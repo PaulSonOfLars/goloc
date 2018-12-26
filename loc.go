@@ -283,11 +283,11 @@ func (l *Locer) Fix(node *ast.File) {
 								Type: &ast.MapType{
 									Key: &ast.BasicLit{
 										Kind:  token.STRING,
-										Value: `"string"`,
+										Value: "string",
 									},
 									Value: &ast.BasicLit{
 										Kind:  token.STRING,
-										Value: `"string"`,
+										Value: "string",
 									},
 								},
 								Elts: mapData,
