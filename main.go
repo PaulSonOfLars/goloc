@@ -12,7 +12,10 @@ import (
 	"go/token"
 	"golang.org/x/tools/go/ast/astutil"
 	"os"
+	"path"
+	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type row struct {
@@ -50,9 +53,9 @@ func main() {
 	verbose := false
 
 	rootCmd := cobra.Command{
-		Use:                    "goloc",
-		Short:                  "Extract strings for i18n of your go tools",
-		Long:                   "Simple i18n tool to allow for extracting all your i18n strings into manageable files, and load them back after.",
+		Use:   "goloc",
+		Short: "Extract strings for i18n of your go tools",
+		Long:  "Simple i18n tool to allow for extracting all your i18n strings into manageable files, and load them back after.",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if verbose {
 				logrus.SetLevel(logrus.DebugLevel)
@@ -87,7 +90,7 @@ func main() {
 	//})
 
 	rootCmd.AddCommand(&cobra.Command{
-		Use: "extract",
+		Use:   "extract",
 		Short: "extract all strings",
 		Run: func(cmd *cobra.Command, args []string) {
 			l.handle(args, l.fix)
@@ -102,7 +105,7 @@ func main() {
 
 func (l *locer) handle(args []string, hdnl func(*ast.File)) error {
 	if len(args) == 0 {
-		logrus.Debugln("No input provided.")
+		logrus.Errorln("No input provided.")
 		return nil
 	}
 	for _, arg := range args {
@@ -121,10 +124,11 @@ func (l *locer) handle(args []string, hdnl func(*ast.File)) error {
 			}
 			for _, n := range nodes {
 				for _, f := range n.Files {
-					if _, ok := l.checked[f.Name.Name]; ok {
+					name := l.fset.File(f.Pos()).Name()
+					if _, ok := l.checked[name]; ok {
 						continue // todo: check for file name clashes in diff packages?
 					}
-					l.checked[f.Name.Name] = struct{}{}
+					l.checked[name] = struct{}{}
 					hdnl(f)
 				}
 			}
@@ -135,12 +139,17 @@ func (l *locer) handle(args []string, hdnl func(*ast.File)) error {
 			if err != nil {
 				return err
 			}
-			if _, ok := l.checked[node.Name.Name]; ok {
+			name := l.fset.File(node.Pos()).Name()
+			if _, ok := l.checked[name]; ok {
 				continue // todo: check for file name clashes in diff packages?
 			}
-			l.checked[node.Name.Name] = struct{}{}
+			l.checked[name] = struct{}{}
 			hdnl(node)
 		}
+	}
+	logrus.Info("the following have been checked:")
+	for k := range l.checked {
+		logrus.Info("  " + k)
 	}
 	return nil
 }
@@ -268,7 +277,11 @@ func (l *locer) inspect(node *ast.File) {
 //	return nil
 //}
 
+// todo: add a "load" call to the init() method for each loaded file
+// todo: ensure import works as expected
 func (l *locer) fix(node *ast.File) {
+	name := l.fset.File(node.Pos()).Name()
+
 	var xmlOutput []row
 	var counter int
 	var inMeth *ast.FuncDecl
@@ -317,92 +330,21 @@ func (l *locer) fix(node *ast.File) {
 							}
 						}
 
-						name := node.Name.Name + ":" + strconv.Itoa(counter)
+						itemName := name + ":" + strconv.Itoa(counter)
 						args := []ast.Expr{
 							&ast.Ident{
 								Name: "lang",
 							},
 							&ast.BasicLit{
 								Kind:  token.STRING,
-								Value: strconv.Quote(name),
+								Value: strconv.Quote(itemName),
 							},
 						}
 
 						data := v.Value[1 : len(v.Value)-1]
 
 						if isFmt {
-							// todo: extract this bit into its own func
-							var mapdata []ast.Expr
-							rdata := []rune(data)
-							var newData []rune
-							index := 1
-							for i := 0; i < len(rdata); i++ {
-								if rdata[i] == '%' && i+1 < len(rdata) {
-									i++
-									switch x := rdata[i]; x {
-									case 's': // string -> no change
-										mapdata = append(mapdata,
-											&ast.KeyValueExpr{
-												Key: &ast.BasicLit{
-													Kind:  token.STRING,
-													Value: strconv.Quote(strconv.Itoa(index)),
-												},
-												Value: ret.Args[index],
-											})
-									case 'd': // int
-										//cmntMap[strconv.Itoa(index)] =
-										mapdata = append(mapdata,
-											&ast.KeyValueExpr{
-												Key: &ast.BasicLit{
-													Kind:  token.STRING,
-													Value: strconv.Quote(strconv.Itoa(index)),
-												},
-												Value: &ast.CallExpr{
-													Fun: &ast.SelectorExpr{
-														X: &ast.Ident{
-															Name: "strconv",
-															Obj:  nil,
-														},
-														Sel: &ast.Ident{
-															Name: "Itoa",
-															Obj:  nil,
-														},
-													},
-													Args: []ast.Expr{ret.Args[index]},
-												},
-											})
-									case 't': // bool
-										mapdata = append(mapdata,
-											&ast.KeyValueExpr{
-												Key: &ast.BasicLit{
-													Kind:  token.STRING,
-													Value: `"` + strconv.Itoa(index) + `"`,
-												},
-												Value: &ast.CallExpr{
-													Fun: &ast.SelectorExpr{
-														X: &ast.Ident{
-															Name: "strconv",
-															Obj:  nil,
-														},
-														Sel: &ast.Ident{
-															Name: "FormatBool",
-															Obj:  nil,
-														},
-													},
-													Args: []ast.Expr{ret.Args[index]},
-												},
-											})
-										//case 'p': // pointer (wtaf)
-										//strconv
-									default:
-										logrus.Fatalf("no way to handle '%s' formatting yet", string(x))
-									}
-									newData = append(newData, []rune("{"+strconv.Itoa(index)+"}")...)
-									index++
-								} else {
-									newData = append(newData, rdata[i])
-								}
-							}
+							newData, mapData := parseFmtString([]rune(data), ret)
 
 							data = string(newData)
 							args = append(args, &ast.CompositeLit{
@@ -416,15 +358,15 @@ func (l *locer) fix(node *ast.File) {
 										Value: `"string"`,
 									},
 								},
-								Elts: mapdata,
+								Elts: mapData,
 							})
 						}
 
 						xmlOutput = append(xmlOutput, row{
 							Id:      counter,
-							Name:    name,
+							Name:    itemName,
 							Value:   data,
-							Comment: name,
+							Comment: itemName,
 						})
 
 						ret.Args = []ast.Expr{&ast.CallExpr{
@@ -467,7 +409,7 @@ func (l *locer) fix(node *ast.File) {
 					}
 				}
 
-				logrus.Debugln("add lang to " + ret.Name.Name)
+				logrus.Debugln("add lang to " + name)
 				ret.Body.List = append([]ast.Stmt{
 					&ast.AssignStmt{
 						Lhs: []ast.Expr{
@@ -501,7 +443,7 @@ func (l *locer) fix(node *ast.File) {
 	out := os.Stdout
 	enc := xml.NewEncoder(os.Stdout)
 	if apply {
-		f, err := os.Open(node.Name.Name)
+		f, err := os.Create(name)
 		if err != nil {
 			logrus.Fatal(err)
 			return
@@ -510,7 +452,13 @@ func (l *locer) fix(node *ast.File) {
 		// set file output
 		out = f
 
-		f2, err := os.Open("eng/" + node.Name.Name)
+		filename := strings.TrimSuffix(path.Join("trans", "eng", name), path.Ext(name)) + ".xml"
+		err = os.MkdirAll(filepath.Dir(filename), 0755)
+		if err != nil {
+			logrus.Fatal(err)
+			return
+		}
+		f2, err := os.Create(filename) // todo parameterise
 		if err != nil {
 			logrus.Fatal(err)
 			return
@@ -519,10 +467,86 @@ func (l *locer) fix(node *ast.File) {
 		// set encoding output
 		enc = xml.NewEncoder(f2)
 	}
-	printer.Fprint(out, l.fset, node)
+	if err := printer.Fprint(out, l.fset, node); err != nil {
+		logrus.Fatal(err)
+		return
+	}
 	enc.Indent("", "    ")
-	enc.Encode(xmlOutput)
+	if err := enc.Encode(xmlOutput); err != nil {
+		logrus.Fatal(err)
+		return
+	}
+}
 
+func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []ast.Expr) {
+	index := 1
+	for i := 0; i < len(rdata); i++ {
+		if rdata[i] == '%' && i+1 < len(rdata) {
+			i++
+			switch x := rdata[i]; x {
+			case 's': // string -> no change
+				mapData = append(mapData,
+					&ast.KeyValueExpr{
+						Key: &ast.BasicLit{
+							Kind:  token.STRING,
+							Value: strconv.Quote(strconv.Itoa(index)),
+						},
+						Value: ret.Args[index],
+					})
+			case 'd': // int
+				mapData = append(mapData,
+					&ast.KeyValueExpr{
+						Key: &ast.BasicLit{
+							Kind:  token.STRING,
+							Value: strconv.Quote(strconv.Itoa(index)),
+						},
+						Value: &ast.CallExpr{
+							Fun: &ast.SelectorExpr{
+								X: &ast.Ident{
+									Name: "strconv",
+									Obj:  nil,
+								},
+								Sel: &ast.Ident{
+									Name: "Itoa",
+									Obj:  nil,
+								},
+							},
+							Args: []ast.Expr{ret.Args[index]},
+						},
+					})
+			case 't': // bool
+				mapData = append(mapData,
+					&ast.KeyValueExpr{
+						Key: &ast.BasicLit{
+							Kind:  token.STRING,
+							Value: `"` + strconv.Itoa(index) + `"`,
+						},
+						Value: &ast.CallExpr{
+							Fun: &ast.SelectorExpr{
+								X: &ast.Ident{
+									Name: "strconv",
+									Obj:  nil,
+								},
+								Sel: &ast.Ident{
+									Name: "FormatBool",
+									Obj:  nil,
+								},
+							},
+							Args: []ast.Expr{ret.Args[index]},
+						},
+					})
+				//case 'p': // pointer (wtaf)
+				//strconv
+			default:
+				logrus.Fatalf("no way to handle '%s' formatting yet", string(x))
+			}
+			newData = append(newData, []rune("{"+strconv.Itoa(index)+"}")...)
+			index++
+		} else {
+			newData = append(newData, rdata[i])
+		}
+	}
+	return newData, mapData
 }
 
 func Trnl() {
