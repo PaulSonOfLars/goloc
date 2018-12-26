@@ -16,8 +16,14 @@ import (
 	"strings"
 )
 
-type Row struct {
-	XMLName xml.Name `xml:"person"`
+const translationDir = "trans"
+
+type Translation struct {
+	XMLName xml.Name `xml:"translation"`
+	Rows []Value
+}
+
+type Value struct {
 	Id      int      `xml:"id,attr"`
 	Name    string   `xml:"name,attr"`
 	Value   string   `xml:"value"`
@@ -213,23 +219,41 @@ func (l *Locer) Inspect(node *ast.File) {
 // todo: ensure import works as expected
 func (l *Locer) Fix(node *ast.File) {
 	name := l.Fset.File(node.Pos()).Name()
+	cntnt := &ast.ExprStmt{
+		X: &ast.CallExpr{
+			Fun: &ast.SelectorExpr{
+				X: &ast.Ident{
+					Name: "goloc",
+				},
+				Sel: &ast.Ident{
+					Name: "Load",
+				},
+			},
+			Args: []ast.Expr{
+				&ast.Ident{
+					Name: strconv.Quote(name),
+				},
+			},
+		},
+	}
 
-	var xmlOutput []Row
+	var xmlOutput Translation
 	var counter int
-	var inMeth *ast.FuncDecl
 	var needsSetting bool
 	var needsImporting bool
+	var initExists bool
+	var initSet bool
+	// should return to node?
 	astutil.Apply(node,
 		/*pre*/ func(cursor *astutil.Cursor) bool {
 			n := cursor.Node()
-			//fmt.Printf("%T, %+v\n", n, n)
 			if ret, ok := n.(*ast.FuncDecl); ok {
-				inMeth = ret
+				if ret.Name.Name == "init" {
+					initExists = true
+				}
 
 			} else if ret, ok := n.(*ast.CallExpr); ok {
 				isValid := false
-				//logrus.Debug("\n found a call ")
-				//printer.Fprint(os.Stdout, fset, ret)
 				methCallName := ""
 				if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
 					logrus.Debug("\n  found call named " + f.Sel.Name)
@@ -294,7 +318,7 @@ func (l *Locer) Fix(node *ast.File) {
 							})
 						}
 
-						xmlOutput = append(xmlOutput, Row{
+						xmlOutput.Rows = append(xmlOutput.Rows, Value{
 							Id:      counter,
 							Name:    itemName,
 							Value:   data,
@@ -333,6 +357,12 @@ func (l *Locer) Fix(node *ast.File) {
 		/*post*/
 		func(cursor *astutil.Cursor) bool {
 			if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
+				if initExists && ret.Name.Name == "init" && !initSet && needsImporting {
+					ret.Body.List = append(ret.Body.List, cntnt)
+					cursor.Replace(ret)
+					initSet = true
+				}
+
 				if len(ret.Body.List) == 0 {
 					return true // do nothing
 				} else if ass, ok := ret.Body.List[0].(*ast.AssignStmt); ok {
@@ -369,14 +399,49 @@ func (l *Locer) Fix(node *ast.File) {
 				needsSetting = false
 			}
 			return true
-
 		},
 	)
+
+	astutil.Apply(node, func(cursor *astutil.Cursor) bool {
+		return true
+	}, func(cursor *astutil.Cursor) bool {
+		if d, ok := cursor.Node().(*ast.GenDecl); ok && d.Tok == token.IMPORT && !initExists && !initSet && needsImporting {
+			v := &ast.FuncDecl{
+				Name: &ast.Ident{
+					Name: "init",
+				},
+				Type: &ast.FuncType{
+					Params: &ast.FieldList{
+						List: []*ast.Field{},
+					},
+					Results: nil,
+				},
+				Body: &ast.BlockStmt{
+					List: []ast.Stmt{
+						cntnt,
+					},
+					Rbrace: 0,
+				},
+			}
+			cursor.InsertAfter(v)
+			initSet = true
+		} else if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
+
+			if initExists && ret.Name.Name == "init" && !initSet && needsImporting {
+				ret.Body.List = append(ret.Body.List, cntnt)
+				cursor.Replace(ret)
+				initSet = true
+			}
+		}
+		return true
+	})
 
 	if needsImporting {
 		astutil.AddImport(l.Fset, node, "github.com/PaulSonOfLars/goloc")
 		ast.SortImports(l.Fset, node)
 	}
+
+	// todo: add strconv import
 
 	out := os.Stdout
 	enc := xml.NewEncoder(os.Stdout)
@@ -390,7 +455,10 @@ func (l *Locer) Fix(node *ast.File) {
 		// set file output
 		out = f
 
-		filename := strings.TrimSuffix(path.Join("trans", "eng", name), path.Ext(name)) + ".xml"
+		// TODO: handle cases where default isnt english
+		// TODO: other filetypes than xml
+		// TODO: choose translationDir
+		filename := strings.TrimSuffix(path.Join(translationDir, "en-GB", name), path.Ext(name)) + ".xml"
 		err = os.MkdirAll(filepath.Dir(filename), 0755)
 		if err != nil {
 			logrus.Fatal(err)
