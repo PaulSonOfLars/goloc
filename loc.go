@@ -1,11 +1,9 @@
-package main
+package goloc
 
 import (
 	"bytes"
 	"encoding/xml"
-	"fmt"
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -18,7 +16,7 @@ import (
 	"strings"
 )
 
-type row struct {
+type Row struct {
 	XMLName xml.Name `xml:"person"`
 	Id      int      `xml:"id,attr"`
 	Name    string   `xml:"name,attr"`
@@ -26,84 +24,18 @@ type row struct {
 	Comment string   `xml:",comment"`
 }
 
-type locer struct {
-	funcs       []string
-	fmtfuncs    []string
-	checked     map[string]struct{}
-	nodes       map[string]toEdit
-	orderedVals []string
-	generator   string
-	fset        *token.FileSet
+type Locer struct {
+	Funcs    []string
+	Fmtfuncs []string
+	Checked  map[string]struct{}
+	//Nodes       map[string]ToEdit
+	OrderedVals []string
+	Generator   string
+	Fset        *token.FileSet
+	Apply       bool
 }
 
-type toEdit struct {
-	value      *ast.BasicLit
-	methodBody *ast.FuncDecl
-	methCall   *ast.CallExpr
-}
-
-var apply = false
-
-func main() {
-	l := &locer{
-		checked: make(map[string]struct{}),
-		nodes:   make(map[string]toEdit),
-		fset:    token.NewFileSet(),
-	}
-	verbose := false
-
-	rootCmd := cobra.Command{
-		Use:   "goloc",
-		Short: "Extract strings for i18n of your go tools",
-		Long:  "Simple i18n tool to allow for extracting all your i18n strings into manageable files, and load them back after.",
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			if verbose {
-				logrus.SetLevel(logrus.DebugLevel)
-			} else {
-				logrus.SetLevel(logrus.InfoLevel)
-			}
-		},
-	}
-	rootCmd.PersistentFlags().StringSliceVar(&l.funcs, "funcs", nil, "")
-	rootCmd.PersistentFlags().StringVar(&l.generator, "generator", "", "")
-	rootCmd.PersistentFlags().StringSliceVar(&l.fmtfuncs, "fmtfuncs", nil, "")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbosity")
-	rootCmd.PersistentFlags().BoolVarP(&apply, "apply", "a", false, "apply -> save to file")
-
-	rootCmd.AddCommand(&cobra.Command{
-		Use:   "inspect",
-		Short: "Run an analyse all appropriate strings in specified files",
-		Run: func(cmd *cobra.Command, args []string) {
-			if err := l.handle(args, l.inspect); err != nil {
-				logrus.Fatal(err)
-			}
-		},
-	})
-
-	//rootCmd.AddCommand(&cobra.Command{
-	//	Use:   "extract",
-	//	Short: "extract all strings",
-	//	Run: func(cmd *cobra.Command, args []string) {
-	//		l.handle(args, l.inspect)
-	//		l.extract()
-	//	},
-	//})
-
-	rootCmd.AddCommand(&cobra.Command{
-		Use:   "extract",
-		Short: "extract all strings",
-		Run: func(cmd *cobra.Command, args []string) {
-			l.handle(args, l.fix)
-		},
-	})
-
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-}
-
-func (l *locer) handle(args []string, hdnl func(*ast.File)) error {
+func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 	if len(args) == 0 {
 		logrus.Errorln("No input provided.")
 		return nil
@@ -118,37 +50,37 @@ func (l *locer) handle(args []string, hdnl func(*ast.File)) error {
 		case mode.IsDir():
 			// do directory stuff
 			logrus.Debugln("directory input")
-			nodes, err := parser.ParseDir(l.fset, arg, nil, parser.ParseComments)
+			nodes, err := parser.ParseDir(l.Fset, arg, nil, parser.ParseComments)
 			if err != nil {
 				return err
 			}
 			for _, n := range nodes {
 				for _, f := range n.Files {
-					name := l.fset.File(f.Pos()).Name()
-					if _, ok := l.checked[name]; ok {
+					name := l.Fset.File(f.Pos()).Name()
+					if _, ok := l.Checked[name]; ok {
 						continue // todo: check for file name clashes in diff packages?
 					}
-					l.checked[name] = struct{}{}
+					l.Checked[name] = struct{}{}
 					hdnl(f)
 				}
 			}
 		case mode.IsRegular():
 			// do file stuff
 			logrus.Debugln("file input")
-			node, err := parser.ParseFile(l.fset, arg, nil, parser.ParseComments)
+			node, err := parser.ParseFile(l.Fset, arg, nil, parser.ParseComments)
 			if err != nil {
 				return err
 			}
-			name := l.fset.File(node.Pos()).Name()
-			if _, ok := l.checked[name]; ok {
+			name := l.Fset.File(node.Pos()).Name()
+			if _, ok := l.Checked[name]; ok {
 				continue // todo: check for file name clashes in diff packages?
 			}
-			l.checked[name] = struct{}{}
+			l.Checked[name] = struct{}{}
 			hdnl(node)
 		}
 	}
 	logrus.Info("the following have been checked:")
-	for k := range l.checked {
+	for k := range l.Checked {
 		logrus.Info("  " + k)
 	}
 	return nil
@@ -156,7 +88,7 @@ func (l *locer) handle(args []string, hdnl func(*ast.File)) error {
 
 // TODO: pass map, to avoid reiteration every time
 // TODO: remove dup code with the fix() method
-func (l *locer) inspect(node *ast.File) {
+func (l *Locer) Inspect(node *ast.File) {
 	var counter int
 	var inMeth *ast.FuncDecl
 	ast.Inspect(node, func(n ast.Node) bool {
@@ -169,11 +101,11 @@ func (l *locer) inspect(node *ast.File) {
 			//printer.Fprint(os.Stdout, fset, ret)
 			if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
 				//logrus.Debug("\n  found call named " + f.Sel.Name)
-				for _, x := range append(l.funcs, l.fmtfuncs...) {
+				for _, x := range append(l.Funcs, l.Fmtfuncs...) {
 					if x == f.Sel.Name {
 						isValid = true
 						logrus.Debug("\n  found call named " + f.Sel.Name)
-						logrus.Debugf("\n   %d", l.fset.Position(f.Pos()).Line)
+						logrus.Debugf("\n   %d", l.Fset.Position(f.Pos()).Line)
 						break
 					}
 				}
@@ -184,17 +116,17 @@ func (l *locer) inspect(node *ast.File) {
 
 				if v, ok := ex.(*ast.BasicLit); ok && v.Kind == token.STRING {
 					buf := bytes.NewBuffer([]byte{})
-					printer.Fprint(buf, l.fset, v)
+					printer.Fprint(buf, l.Fset, v)
 					logrus.Debugf("\n   found a string:\n%s", buf.String())
 
 					counter++
-					name := l.fset.File(v.Pos()).Name() + ":" + strconv.Itoa(counter)
-					l.orderedVals = append(l.orderedVals, name)
-					l.nodes[name] = toEdit{
-						value:      v,
-						methodBody: inMeth,
-						methCall:   ret,
-					}
+					name := l.Fset.File(v.Pos()).Name() + ":" + strconv.Itoa(counter)
+					l.OrderedVals = append(l.OrderedVals, name)
+					//l.Nodes[name] = ToEdit{
+					//	Value:      v,
+					//	MethodBody: inMeth,
+					//	MethCall:   ret,
+					//}
 
 				} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
 					// note: plz reformat not to use adds
@@ -279,10 +211,10 @@ func (l *locer) inspect(node *ast.File) {
 
 // todo: add a "load" call to the init() method for each loaded file
 // todo: ensure import works as expected
-func (l *locer) fix(node *ast.File) {
-	name := l.fset.File(node.Pos()).Name()
+func (l *Locer) Fix(node *ast.File) {
+	name := l.Fset.File(node.Pos()).Name()
 
-	var xmlOutput []row
+	var xmlOutput []Row
 	var counter int
 	var inMeth *ast.FuncDecl
 	var isSet bool
@@ -302,12 +234,12 @@ func (l *locer) fix(node *ast.File) {
 				methCallName := ""
 				if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
 					logrus.Debug("\n  found call named " + f.Sel.Name)
-					for _, x := range append(l.funcs, l.fmtfuncs...) {
+					for _, x := range append(l.Funcs, l.Fmtfuncs...) {
 						if x == f.Sel.Name {
 							isValid = true
 							methCallName = f.Sel.Name
 							logrus.Debug("\n  found call named " + f.Sel.Name)
-							logrus.Debugf("\n   %d", l.fset.Position(f.Pos()).Line)
+							logrus.Debugf("\n   %d", l.Fset.Position(f.Pos()).Line)
 							break
 						}
 					}
@@ -318,12 +250,12 @@ func (l *locer) fix(node *ast.File) {
 
 					if v, ok := ex.(*ast.BasicLit); ok && v.Kind == token.STRING {
 						buf := bytes.NewBuffer([]byte{})
-						printer.Fprint(buf, l.fset, v)
+						printer.Fprint(buf, l.Fset, v)
 						logrus.Debugf("\n   found a string:\n%s", buf.String())
 
 						counter++
 						isFmt := false
-						for _, v := range l.fmtfuncs {
+						for _, v := range l.Fmtfuncs {
 							if methCallName == v {
 								isFmt = true
 								break
@@ -362,7 +294,7 @@ func (l *locer) fix(node *ast.File) {
 							})
 						}
 
-						xmlOutput = append(xmlOutput, row{
+						xmlOutput = append(xmlOutput, Row{
 							Id:      counter,
 							Name:    itemName,
 							Value:   data,
@@ -436,13 +368,13 @@ func (l *locer) fix(node *ast.File) {
 	)
 
 	if needsImporting {
-		astutil.AddImport(l.fset, node, "github.com/PaulSonOfLars/goloc")
-		ast.SortImports(l.fset, node)
+		astutil.AddImport(l.Fset, node, "github.com/PaulSonOfLars/goloc")
+		ast.SortImports(l.Fset, node)
 	}
 
 	out := os.Stdout
 	enc := xml.NewEncoder(os.Stdout)
-	if apply {
+	if l.Apply {
 		f, err := os.Create(name)
 		if err != nil {
 			logrus.Fatal(err)
@@ -467,7 +399,7 @@ func (l *locer) fix(node *ast.File) {
 		// set encoding output
 		enc = xml.NewEncoder(f2)
 	}
-	if err := printer.Fprint(out, l.fset, node); err != nil {
+	if err := printer.Fprint(out, l.Fset, node); err != nil {
 		logrus.Fatal(err)
 		return
 	}
@@ -476,79 +408,4 @@ func (l *locer) fix(node *ast.File) {
 		logrus.Fatal(err)
 		return
 	}
-}
-
-func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []ast.Expr) {
-	index := 1
-	for i := 0; i < len(rdata); i++ {
-		if rdata[i] == '%' && i+1 < len(rdata) {
-			i++
-			switch x := rdata[i]; x {
-			case 's': // string -> no change
-				mapData = append(mapData,
-					&ast.KeyValueExpr{
-						Key: &ast.BasicLit{
-							Kind:  token.STRING,
-							Value: strconv.Quote(strconv.Itoa(index)),
-						},
-						Value: ret.Args[index],
-					})
-			case 'd': // int
-				mapData = append(mapData,
-					&ast.KeyValueExpr{
-						Key: &ast.BasicLit{
-							Kind:  token.STRING,
-							Value: strconv.Quote(strconv.Itoa(index)),
-						},
-						Value: &ast.CallExpr{
-							Fun: &ast.SelectorExpr{
-								X: &ast.Ident{
-									Name: "strconv",
-									Obj:  nil,
-								},
-								Sel: &ast.Ident{
-									Name: "Itoa",
-									Obj:  nil,
-								},
-							},
-							Args: []ast.Expr{ret.Args[index]},
-						},
-					})
-			case 't': // bool
-				mapData = append(mapData,
-					&ast.KeyValueExpr{
-						Key: &ast.BasicLit{
-							Kind:  token.STRING,
-							Value: `"` + strconv.Itoa(index) + `"`,
-						},
-						Value: &ast.CallExpr{
-							Fun: &ast.SelectorExpr{
-								X: &ast.Ident{
-									Name: "strconv",
-									Obj:  nil,
-								},
-								Sel: &ast.Ident{
-									Name: "FormatBool",
-									Obj:  nil,
-								},
-							},
-							Args: []ast.Expr{ret.Args[index]},
-						},
-					})
-				//case 'p': // pointer (wtaf)
-				//strconv
-			default:
-				logrus.Fatalf("no way to handle '%s' formatting yet", string(x))
-			}
-			newData = append(newData, []rune("{"+strconv.Itoa(index)+"}")...)
-			index++
-		} else {
-			newData = append(newData, rdata[i])
-		}
-	}
-	return newData, mapData
-}
-
-func Trnl() {
-	// todo: load from thingy and translate
 }
