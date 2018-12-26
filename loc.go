@@ -274,8 +274,9 @@ func (l *Locer) Fix(node *ast.File) {
 						}
 
 						data := v.Value[1 : len(v.Value)-1]
-
+						methToCall := "Trnl"
 						if isFmt {
+							methToCall = "Trnlf"
 							newData, mapData := parseFmtString([]rune(data), ret)
 
 							data = string(newData)
@@ -307,7 +308,7 @@ func (l *Locer) Fix(node *ast.File) {
 									Name: "goloc",
 								},
 								Sel: &ast.Ident{
-									Name: "Trnl",
+									Name: methToCall,
 								},
 							},
 							Args: args,
@@ -346,16 +347,20 @@ func (l *Locer) Fix(node *ast.File) {
 					&ast.AssignStmt{
 						Lhs: []ast.Expr{
 							&ast.Ident{
-								NamePos: 0,
-								Name:    "lang",
-							}},
+								Name: "lang",
+							},
+						},
 						Tok: token.DEFINE,
 						Rhs: []ast.Expr{
 							&ast.CallExpr{
 								Fun: &ast.Ident{
-									Name: "eng", // todo: parameterise
+									Name: "getLang", // todo: parameterise
 								},
-								Args: []ast.Expr{}, // todo figure this bit out
+								Args: []ast.Expr{
+									&ast.Ident{
+										Name: "u",
+									},
+								}, // todo figure this bit out
 							},
 						},
 					},
