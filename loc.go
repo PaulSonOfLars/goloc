@@ -217,7 +217,7 @@ func (l *Locer) Fix(node *ast.File) {
 	var xmlOutput []Row
 	var counter int
 	var inMeth *ast.FuncDecl
-	var isSet bool
+	var needsSetting bool
 	var needsImporting bool
 	astutil.Apply(node,
 		/*pre*/ func(cursor *astutil.Cursor) bool {
@@ -225,7 +225,6 @@ func (l *Locer) Fix(node *ast.File) {
 			//fmt.Printf("%T, %+v\n", n, n)
 			if ret, ok := n.(*ast.FuncDecl); ok {
 				inMeth = ret
-				isSet = false
 
 			} else if ret, ok := n.(*ast.CallExpr); ok {
 				isValid := false
@@ -316,6 +315,7 @@ func (l *Locer) Fix(node *ast.File) {
 
 						cursor.Replace(ret)
 						needsImporting = true
+						needsSetting = true
 
 					} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
 						// note: plz reformat not to use adds
@@ -332,13 +332,13 @@ func (l *Locer) Fix(node *ast.File) {
 		},
 		/*post*/
 		func(cursor *astutil.Cursor) bool {
-			if ret, ok := cursor.Node().(*ast.FuncDecl); ok && !isSet {
+			if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
 				if len(ret.Body.List) == 0 {
 					return true // do nothing
 				} else if ass, ok := ret.Body.List[0].(*ast.AssignStmt); ok {
 					// todo: stronger check
 					if i, ok := ass.Lhs[0].(*ast.Ident); ok && i.Name == "lang" { // check/update generator
-						return true // end
+						return true // continue and ignore
 					}
 				}
 
@@ -366,6 +366,7 @@ func (l *Locer) Fix(node *ast.File) {
 					},
 				}, ret.Body.List...)
 				cursor.Replace(ret)
+				needsSetting = false
 			}
 			return true
 
