@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []ast.Expr) {
+func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []ast.Expr, needStrconv bool) {
 	index := 1
 	for i := 0; i < len(rdata); i++ {
 		if rdata[i] == '%' && i+1 < len(rdata) {
@@ -43,6 +43,7 @@ func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []
 							Args: []ast.Expr{ret.Args[index]},
 						},
 					})
+				needStrconv = true
 			case 't': // bool
 				mapData = append(mapData,
 					&ast.KeyValueExpr{
@@ -75,5 +76,5 @@ func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []
 			newData = append(newData, rdata[i])
 		}
 	}
-	return newData, mapData
+	return newData, mapData, needStrconv
 }

@@ -32,23 +32,26 @@ func Load(moduleToLoad string) {
 		return
 	}
 	for _, x := range files {
-		f, err := os.Open(path.Join(translationDir, x.Name(), strings.TrimSuffix(moduleToLoad, path.Ext(moduleToLoad)) + ".xml"))
-		if err != nil {
-			logrus.Fatal(err)
-			return
-		}
-		dec := xml.NewDecoder(f)
-		var xmlData Translation
-		err = dec.Decode(&xmlData)
-		if err != nil {
-			logrus.Fatal(err)
-			return
-		}
-		for _, row := range xmlData.Rows {
-			if _,ok := data[path.Base(x.Name())]; !ok {
-				data[path.Base(x.Name())] = make(map[string]Value)
+		func() {
+			f, err := os.Open(path.Join(translationDir, x.Name(), strings.TrimSuffix(moduleToLoad, path.Ext(moduleToLoad))+".xml"))
+			if err != nil {
+				logrus.Fatal(err)
+				return
 			}
-			data[path.Base(x.Name())][row.Name] = row
-		}
+			defer f.Close()
+			dec := xml.NewDecoder(f)
+			var xmlData Translation
+			err = dec.Decode(&xmlData)
+			if err != nil {
+				logrus.Fatal(err)
+				return
+			}
+			for _, row := range xmlData.Rows {
+				if _, ok := data[path.Base(x.Name())]; !ok {
+					data[path.Base(x.Name())] = make(map[string]Value)
+				}
+				data[path.Base(x.Name())][row.Name] = row
+			}
+		}()
 	}
 }

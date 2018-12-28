@@ -5,9 +5,11 @@ import (
 	"encoding/xml"
 	"github.com/sirupsen/logrus"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"golang.org/x/text/language"
 	"golang.org/x/tools/go/ast/astutil"
 	"os"
 	"path"
@@ -20,20 +22,21 @@ const translationDir = "trans"
 
 type Translation struct {
 	XMLName xml.Name `xml:"translation"`
-	Rows []Value
+	Rows    []Value
 }
 
 type Value struct {
-	Id      int      `xml:"id,attr"`
-	Name    string   `xml:"name,attr"`
-	Value   string   `xml:"value"`
-	Comment string   `xml:",comment"`
+	Id      int    `xml:"id,attr"`
+	Name    string `xml:"name,attr"`
+	Value   string `xml:"value"`
+	Comment string `xml:",comment"`
 }
 
 type Locer struct {
-	Funcs    []string
-	Fmtfuncs []string
-	Checked  map[string]struct{}
+	DefaultLang language.Tag
+	Funcs       []string
+	Fmtfuncs    []string
+	Checked     map[string]struct{}
 	//Nodes       map[string]ToEdit
 	OrderedVals []string
 	Generator   string
@@ -92,7 +95,6 @@ func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 	return nil
 }
 
-// TODO: pass map, to avoid reiteration every time
 // TODO: remove dup code with the fix() method
 func (l *Locer) Inspect(node *ast.File) {
 	var counter int
@@ -152,70 +154,6 @@ func (l *Locer) Inspect(node *ast.File) {
 	logrus.Debugln()
 }
 
-// TODO: decide what to do with this dead code.
-// stick to astutil currently used, or the byte-level ops done here?
-
-//func (l *locer) extract() error {
-//	opened := make(map[string][]byte)
-//	offset := make(map[string]int)
-//	for _, v := range l.orderedVals {
-//		toEdit := l.nodes[v]
-//		node := toEdit.value
-//		methBody := toEdit.methodBody
-//		filename := l.fset.File(node.Pos()).Name()
-//		ctnt, ok := opened[filename]
-//		if !ok {
-//			dat, err := ioutil.ReadFile(filename)
-//			if err != nil {
-//				return err
-//			}
-//			ctnt = dat
-//		}
-//
-//		off := offset[filename]
-//
-//		logrus.Debugln(methBody.Name)
-//		logrus.Debugln(string(ctnt[l.fset.Position(methBody.Body.Pos()).Offset+off : l.fset.Position(methBody.Body.End()).Offset+off]))
-//
-//		loader := fmt.Sprintf("lang := %s\n", "GetLang(u)") // todo this should be modularised
-//		ctnt = append([]byte(loader), ctnt[l.fset.Position(methBody.Body.Pos()).Offset+off:l.fset.Position(methBody.Body.End()).Offset+off]...)
-//
-//		off += len(loader)
-//
-//		//fmt.Println(methBody.Body.Pos())
-//		//fmt.Println(methBody.Body.End())
-//
-//		// todo: need to have method body access to write lang loader (+ add offset)
-//		repl := ""
-//		//ok := false
-//		//for _, v := range l.fmtfuncs {
-//		//if methCallName == v { // todo: need methcall access
-//		//	ok = true
-//		//	break
-//		//}
-//		//}
-//		//if ok {
-//		//	its a fmt func; generate extra
-//		//} else {
-//		//	repl = `"idek"`
-//		//}
-//		start := l.fset.Position(node.Pos())
-//		end := l.fset.Position(node.End())
-//
-//		logrus.Debug(start, start.Offset, start.Offset+off)
-//		logrus.Debug(end, end.Offset, start.Offset+off)
-//		logrus.Debug(len(ctnt))
-//
-//		opened[filename] = append(append(ctnt[:start.Offset+off], repl...), ctnt[end.Offset+off:]...)
-//		offset[filename] = off + start.Offset - end.Offset + len(repl)
-//	}
-//	//for _, v := range opened {
-//	//	fmt.Println(string(v))
-//	//}
-//	return nil
-//}
-
-// todo: add a "load" call to the init() method for each loaded file
 // todo: ensure import works as expected
 func (l *Locer) Fix(node *ast.File) {
 	name := l.Fset.File(node.Pos()).Name()
@@ -237,12 +175,27 @@ func (l *Locer) Fix(node *ast.File) {
 		},
 	}
 
-	var xmlOutput Translation
-	var counter int
-	var needsSetting bool
-	var needsImporting bool
-	var initExists bool
-	var initSet bool
+	// todo: check init load works as expected
+
+	Load(name) // load current values
+
+	newData := make(map[string]map[string]map[string]Value) // locale:(filename:(trigger:Value))
+	dataNames := make(map[string][]string)                  // filename:[]triggers
+
+	newData[l.DefaultLang.String()] = make(map[string]map[string]Value)
+	newData[l.DefaultLang.String()][name] = make(map[string]Value)
+	for k := range data { // initialise all languages
+		newData[k] = make(map[string]map[string]Value)
+		newData[k][name] = make(map[string]Value)
+	}
+
+	var counter int            // translation counter value
+	var needsSetting bool      // method needs the lang := arg
+	var needsImporting bool    // goloc needs importing
+	var needStrconvImport bool // need to import strconv
+	var initExists bool        // does init method exist
+	var initSet bool           // has the init method been set
+
 	// should return to node?
 	astutil.Apply(node,
 		/*pre*/ func(cursor *astutil.Cursor) bool {
@@ -256,12 +209,12 @@ func (l *Locer) Fix(node *ast.File) {
 				isValid := false
 				methCallName := ""
 				if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
-					logrus.Debug("\n  found call named " + f.Sel.Name)
+					logrus.Debug("\n  found random call named " + f.Sel.Name)
 					for _, x := range append(l.Funcs, l.Fmtfuncs...) {
 						if x == f.Sel.Name {
 							isValid = true
 							methCallName = f.Sel.Name
-							logrus.Debug("\n  found call named " + f.Sel.Name)
+							logrus.Debug("\n  found valid call named " + f.Sel.Name)
 							logrus.Debugf("\n   %d", l.Fset.Position(f.Pos()).Line)
 							break
 						}
@@ -300,7 +253,8 @@ func (l *Locer) Fix(node *ast.File) {
 						methToCall := "Trnl"
 						if isFmt {
 							methToCall = "Trnlf"
-							newData, mapData := parseFmtString([]rune(data), ret)
+							newData, mapData, needStrconv := parseFmtString([]rune(data), ret)
+							needStrconvImport = needStrconv
 
 							data = string(newData)
 							args = append(args, &ast.CompositeLit{
@@ -318,12 +272,15 @@ func (l *Locer) Fix(node *ast.File) {
 							})
 						}
 
-						xmlOutput.Rows = append(xmlOutput.Rows, Value{
-							Id:      counter,
-							Name:    itemName,
-							Value:   data,
-							Comment: itemName,
-						})
+						for lang := range newData {
+							newData[lang][name][itemName] = Value{
+								Id:      counter,
+								Name:    itemName,
+								Value:   data, // TODO: only set data for default english?
+								Comment: itemName,
+							}
+						}
+						dataNames[name] = append(dataNames[name], itemName)
 
 						ret.Args = []ast.Expr{&ast.CallExpr{
 							Fun: &ast.SelectorExpr{
@@ -344,6 +301,34 @@ func (l *Locer) Fix(node *ast.File) {
 					} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
 						// note: plz reformat not to use adds
 						logrus.Debug("\n   found a binary expr instead of str; fix your code")
+
+					} else if meth, ok := ex.(*ast.CallExpr); ok {
+						logrus.Debugf("\n   found a subcall method: %+v", meth)
+						if fun, ok := meth.Fun.(*ast.SelectorExpr); ok && fun.X.(*ast.Ident).Name == "goloc" && (fun.Sel.Name == "Trnl" || fun.Sel.Name == "Trnlf") {
+							if arg, ok := meth.Args[1].(*ast.BasicLit); ok && arg.Kind == token.STRING {
+								counter++ // todo: remove duplicate counter increment
+								itemName := name + ":" + strconv.Itoa(counter)
+
+								val, err := strconv.Unquote(arg.Value)
+								if err != nil {
+									logrus.Fatal(err)
+									return true
+								}
+								for lang := range newData {
+									newData[lang][name][itemName] = Value{
+										Id:      counter,
+										Name:    itemName,
+										Value:   data[lang][val].Value,
+										Comment: itemName,
+									}
+								}
+								dataNames[name] = append(dataNames[name], itemName)
+
+							}
+
+						} else {
+							logrus.Debugf("\n   found an unexpected subcall method: %T, %+v", ex, ex)
+						}
 
 					} else {
 						logrus.Debugf("\n   found something else: %T", ex)
@@ -441,10 +426,12 @@ func (l *Locer) Fix(node *ast.File) {
 		ast.SortImports(l.Fset, node)
 	}
 
-	// todo: add strconv import
+	if needStrconvImport {
+		astutil.AddImport(l.Fset, node, "strconv")
+		ast.SortImports(l.Fset, node)
+	}
 
 	out := os.Stdout
-	enc := xml.NewEncoder(os.Stdout)
 	if l.Apply {
 		f, err := os.Create(name)
 		if err != nil {
@@ -455,31 +442,58 @@ func (l *Locer) Fix(node *ast.File) {
 		// set file output
 		out = f
 
-		// TODO: handle cases where default isnt english
-		// TODO: other filetypes than xml
-		// TODO: choose translationDir
-		filename := strings.TrimSuffix(path.Join(translationDir, "en-GB", name), path.Ext(name)) + ".xml"
-		err = os.MkdirAll(filepath.Dir(filename), 0755)
-		if err != nil {
-			logrus.Fatal(err)
-			return
-		}
-		f2, err := os.Create(filename) // todo parameterise
-		if err != nil {
-			logrus.Fatal(err)
-			return
-		}
-		defer f2.Close()
-		// set encoding output
-		enc = xml.NewEncoder(f2)
 	}
-	if err := printer.Fprint(out, l.Fset, node); err != nil {
+	if err := format.Node(out, l.Fset, node); err != nil {
 		logrus.Fatal(err)
 		return
 	}
-	enc.Indent("", "    ")
-	if err := enc.Encode(xmlOutput); err != nil {
+	if err := l.saveMap(newData, dataNames); err != nil {
 		logrus.Fatal(err)
 		return
 	}
+}
+
+// todo: simplify the newData structure
+func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataNames map[string][]string) error {
+	for lang, filenameMap := range newData {
+		for name, data := range filenameMap {
+			var xmlOutput Translation
+			for _, k := range dataNames[name] {
+				langData := data[k]
+				if lang != l.DefaultLang.String() { // do not set english string for non-english languages
+					langData.Value = ""
+				}
+				xmlOutput.Rows = append(xmlOutput.Rows, langData)
+			}
+
+			err := func() error {
+				// TODO: other filetypes than xml
+				enc := xml.NewEncoder(os.Stdout)
+				if l.Apply {
+					// TODO: choose translationDir
+					xmlName := strings.TrimSuffix(path.Join(translationDir, lang, name), path.Ext(name)) + ".xml"
+					err := os.MkdirAll(filepath.Dir(xmlName), 0755)
+					if err != nil {
+						return err
+					}
+					f, err := os.Create(xmlName)
+					if err != nil {
+						return err
+					}
+					defer f.Close()
+					// set encoding output
+					enc = xml.NewEncoder(f)
+				}
+				enc.Indent("", "    ")
+				if err := enc.Encode(xmlOutput); err != nil {
+					return err
+				}
+				return nil
+			}()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
