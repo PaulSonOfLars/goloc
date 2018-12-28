@@ -308,7 +308,6 @@ func (l *Locer) Fix(node *ast.File) {
 							if arg, ok := meth.Args[1].(*ast.BasicLit); ok && arg.Kind == token.STRING {
 								counter++ // todo: remove duplicate counter increment
 								itemName := name + ":" + strconv.Itoa(counter)
-
 								val, err := strconv.Unquote(arg.Value)
 								if err != nil {
 									logrus.Fatal(err)
@@ -319,20 +318,18 @@ func (l *Locer) Fix(node *ast.File) {
 										Id:      counter,
 										Name:    itemName,
 										Value:   data[lang][val].Value,
-										Comment: itemName,
+										Comment: data[lang][val].Comment,
 									}
 								}
 								dataNames[name] = append(dataNames[name], itemName)
-
+								arg.Value = strconv.Quote(itemName)
+								cursor.Replace(n)
 							}
-
 						} else {
 							logrus.Debugf("\n   found an unexpected subcall method: %T, %+v", ex, ex)
 						}
-
 					} else {
 						logrus.Debugf("\n   found something else: %T", ex)
-
 					}
 				}
 			}
