@@ -39,7 +39,6 @@ type Locer struct {
 	Checked     map[string]struct{}
 	//Nodes       map[string]ToEdit
 	OrderedVals []string
-	Generator   string
 	Fset        *token.FileSet
 	Apply       bool
 }

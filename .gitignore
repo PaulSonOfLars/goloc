@@ -12,5 +12,4 @@
 *.out
 
 # individually added
-goloc
 .idea/
