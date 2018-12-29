@@ -493,3 +493,53 @@ func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataName
 	}
 	return nil
 }
+func (l *Locer) Create(args []string, lang language.Tag) {
+	err := filepath.Walk(path.Join(translationDir, l.DefaultLang.String()),
+		func(filepath string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+
+			f, err := os.Open(filepath)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			dec := xml.NewDecoder(f)
+			var xmlData Translation
+			err = dec.Decode(&xmlData)
+			if err != nil {
+				return err
+			}
+
+			for i := 0; i < len(xmlData.Rows); i++ {
+				xmlData.Rows[i].Comment = xmlData.Rows[i].Value
+				xmlData.Rows[i].Value = ""
+
+			}
+
+			filename := strings.Replace(filepath, l.DefaultLang.String(), lang.String(), 1)
+
+			if err := os.MkdirAll(path.Dir(filename), 0755); err != nil {
+				return err
+			}
+
+			newF, err := os.Create(filename)
+			if err != nil {
+				return err
+			}
+			defer newF.Close()
+			enc := xml.NewEncoder(newF)
+			enc.Indent("", "    ")
+			if err := enc.Encode(xmlData); err != nil {
+				return err
+			}
+			return nil
+		})
+	if err != nil {
+		logrus.Fatal(err)
+	}
+}

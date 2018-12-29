@@ -30,6 +30,9 @@ func main() {
 				logrus.SetLevel(logrus.InfoLevel)
 			}
 			l.DefaultLang = language.Make(lang)
+			if l.DefaultLang == language.Und {
+				logrus.Fatalf("invalid language selected: '%s' does not match any known language codes")
+			}
 		},
 	}
 	rootCmd.PersistentFlags().StringSliceVar(&l.Funcs, "funcs", nil, "all funcs to extraxt")
@@ -48,15 +51,6 @@ func main() {
 		},
 	})
 
-	//rootCmd.AddCommand(&cobra.Command{
-	//	Use:   "extract",
-	//	Short: "extract all strings",
-	//	Run: func(cmd *cobra.Command, args []string) {
-	//		l.handle(args, l.inspect)
-	//		l.extract()
-	//	},
-	//})
-
 	rootCmd.AddCommand(&cobra.Command{
 		Use:   "extract",
 		Short: "extract all strings",
@@ -64,6 +58,27 @@ func main() {
 			l.Handle(args, l.Fix)
 		},
 	})
+
+	createLang := ""
+	createCmd := &cobra.Command{
+		Use:   "create",
+		Short: "create new language from default",
+		Run: func(cmd *cobra.Command, args []string) {
+			if createLang == "" {
+				logrus.Error("No language to create specified")
+				return
+			}
+			lang := language.Make(createLang)
+			if lang == language.Und {
+				logrus.Fatalf("invalid language selected: '%s' does not match any known language codes")
+			}
+
+			l.Create(args, lang)
+		},
+	}
+	createCmd.Flags().StringVarP(&createLang, "create", "c", "", "select which language to create")
+
+	rootCmd.AddCommand(createCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
