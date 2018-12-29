@@ -199,136 +199,197 @@ func (l *Locer) Fix(node *ast.File) {
 	astutil.Apply(node,
 		/*pre*/ func(cursor *astutil.Cursor) bool {
 			n := cursor.Node()
+			// get info on init call.
 			if ret, ok := n.(*ast.FuncDecl); ok {
 				if ret.Name.Name == "init" {
 					initExists = true
 				}
 
+				// Check method calls
 			} else if ret, ok := n.(*ast.CallExpr); ok {
-				isValid := false
-				methCallName := ""
+
+				// determine if method is one of the validated ones
 				if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
 					logrus.Debug("\n  found random call named " + f.Sel.Name)
-					for _, x := range append(l.Funcs, l.Fmtfuncs...) {
-						if x == f.Sel.Name {
-							isValid = true
-							methCallName = f.Sel.Name
-							logrus.Debug("\n  found valid call named " + f.Sel.Name)
-							logrus.Debugf("\n   %d", l.Fset.Position(f.Pos()).Line)
-							break
-						}
-					}
-				}
 
-				if isValid && len(ret.Args) > 0 {
-					ex := ret.Args[0]
+					// if valid and has args, check first arg (which should be a string)
+					if contains(append(l.Funcs, l.Fmtfuncs...), f.Sel.Name) && len(ret.Args) > 0 {
+						ex := ret.Args[0]
 
-					if v, ok := ex.(*ast.BasicLit); ok && v.Kind == token.STRING {
-						buf := bytes.NewBuffer([]byte{})
-						printer.Fprint(buf, l.Fset, v)
-						logrus.Debugf("\n   found a string:\n%s", buf.String())
+						if v, ok := ex.(*ast.BasicLit); ok && v.Kind == token.STRING {
+							buf := bytes.NewBuffer([]byte{})
+							printer.Fprint(buf, l.Fset, v)
+							logrus.Debugf("\n   found a string:\n%s", buf.String())
+							counter++
 
-						counter++
-						isFmt := false
-						for _, v := range l.Fmtfuncs {
-							if methCallName == v {
-								isFmt = true
-								break
+							itemName := name + ":" + strconv.Itoa(counter)
+							args := []ast.Expr{
+								&ast.Ident{
+									Name: "lang",
+								},
+								&ast.BasicLit{
+									Kind:  token.STRING,
+									Value: strconv.Quote(itemName),
+								},
 							}
-						}
 
-						itemName := name + ":" + strconv.Itoa(counter)
-						args := []ast.Expr{
-							&ast.Ident{
-								Name: "lang",
-							},
-							&ast.BasicLit{
-								Kind:  token.STRING,
-								Value: strconv.Quote(itemName),
-							},
-						}
-
-						data := v.Value[1 : len(v.Value)-1]
-						methToCall := "Trnl"
-						if isFmt {
-							methToCall = "Trnlf"
-							newData, mapData, needStrconv := parseFmtString([]rune(data), ret)
-							needStrconvImport = needStrconv
-
-							data = string(newData)
-							args = append(args, &ast.CompositeLit{
-								Type: &ast.MapType{
-									Key: &ast.BasicLit{
-										Kind:  token.STRING,
-										Value: "string",
-									},
-									Value: &ast.BasicLit{
-										Kind:  token.STRING,
-										Value: "string",
-									},
-								},
-								Elts: mapData,
-							})
-						}
-
-						for lang := range newData {
-							newData[lang][name][itemName] = Value{
-								Id:      counter,
-								Name:    itemName,
-								Value:   data, // TODO: only set data for default english?
-								Comment: itemName,
+							data, err := strconv.Unquote(v.Value)
+							if err != nil {
+								logrus.Fatal(err)
+								return true
 							}
+
+							methToCall := "Trnl"
+							if contains(l.Fmtfuncs, f.Sel.Name) { // is a format call
+								methToCall = "Trnlf"
+								newData, mapData, needStrconv := parseFmtString([]rune(data), ret)
+								needStrconvImport = needStrconv
+
+								data = string(newData)
+								args = append(args, &ast.CompositeLit{
+									Type: &ast.MapType{
+										Key: &ast.BasicLit{
+											Kind:  token.STRING,
+											Value: "string",
+										},
+										Value: &ast.BasicLit{
+											Kind:  token.STRING,
+											Value: "string",
+										},
+									},
+									Elts: mapData,
+								})
+							}
+
+							for lang := range newData {
+								newData[lang][name][itemName] = Value{
+									Id:      counter,
+									Name:    itemName,
+									Value:   data, // TODO: only set data for default english?
+									Comment: itemName,
+								}
+							}
+							dataNames[name] = append(dataNames[name], itemName)
+
+							ret.Args = []ast.Expr{&ast.CallExpr{
+								Fun: &ast.SelectorExpr{
+									X: &ast.Ident{
+										Name: "goloc",
+									},
+									Sel: &ast.Ident{
+										Name: methToCall,
+									},
+								},
+								Args: args,
+							}}
+
+							cursor.Replace(ret)
+							needsImporting = true
+							needsSetting = true
+
+							// if not a string, but a binop:
+						} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
+							// note: plz reformat not to use adds
+							logrus.Debug("\n   found a binary expr instead of str; fix your code")
+
+							// if not a string, but another meth call
+						} else if meth, ok := ex.(*ast.CallExpr); ok {
+							logrus.Debugf("\n   found a subcall method: %+v", meth)
+							// if meth call is a goloc call
+							if fun, ok := meth.Fun.(*ast.SelectorExpr); ok && fun.X.(*ast.Ident).Name == "goloc" && fun.Sel.Name == "Trnl" || fun.Sel.Name == "Trnlf" {
+								if arg, ok := meth.Args[1].(*ast.BasicLit); ok && arg.Kind == token.STRING {
+									counter++ // todo: remove duplicate counter increment
+									itemName := name + ":" + strconv.Itoa(counter)
+									val, err := strconv.Unquote(arg.Value)
+									if err != nil {
+										logrus.Fatal(err)
+										return true
+									}
+									for lang := range newData {
+										newData[lang][name][itemName] = Value{
+											Id:      counter,
+											Name:    itemName,
+											Value:   data[lang][val].Value,
+											Comment: data[lang][val].Comment,
+										}
+									}
+									dataNames[name] = append(dataNames[name], itemName)
+									arg.Value = strconv.Quote(itemName)
+									cursor.Replace(n)
+								}
+							} else {
+								logrus.Debugf("\n   found an unexpected subcall method: %T, %+v", ex, ex)
+							}
+						} else {
+							logrus.Debugf("\n   found something else: %T", ex)
 						}
-						dataNames[name] = append(dataNames[name], itemName)
-
-						ret.Args = []ast.Expr{&ast.CallExpr{
-							Fun: &ast.SelectorExpr{
-								X: &ast.Ident{
-									Name: "goloc",
-								},
-								Sel: &ast.Ident{
-									Name: methToCall,
-								},
-							},
-							Args: args,
-						}}
-
-						cursor.Replace(ret)
-						needsImporting = true
-						needsSetting = true
-
-					} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
-						// note: plz reformat not to use adds
-						logrus.Debug("\n   found a binary expr instead of str; fix your code")
-
-					} else if meth, ok := ex.(*ast.CallExpr); ok {
-						logrus.Debugf("\n   found a subcall method: %+v", meth)
-						if fun, ok := meth.Fun.(*ast.SelectorExpr); ok && fun.X.(*ast.Ident).Name == "goloc" && (fun.Sel.Name == "Trnl" || fun.Sel.Name == "Trnlf") {
-							if arg, ok := meth.Args[1].(*ast.BasicLit); ok && arg.Kind == token.STRING {
-								counter++ // todo: remove duplicate counter increment
+					} else if prev, ok := f.X.(*ast.Ident); ok && prev.Name == "goloc" {
+						if f.Sel.Name == "Add" || f.Sel.Name == "Addf" {
+							if v, ok := ret.Args[0].(*ast.BasicLit); ok {
+								// TODO: all this is duplicated stuff from the other one
+								counter++
 								itemName := name + ":" + strconv.Itoa(counter)
-								val, err := strconv.Unquote(arg.Value)
+								args := []ast.Expr{
+									&ast.Ident{
+										Name: "lang",
+									},
+									&ast.BasicLit{
+										Kind:  token.STRING,
+										Value: strconv.Quote(itemName),
+									},
+								}
+								methToCall := "Trnl"
+								data, err := strconv.Unquote(v.Value)
 								if err != nil {
 									logrus.Fatal(err)
 									return true
+								}
+								if f.Sel.Name == "Addf" {
+									methToCall = "Trnlf"
+									newData, mapData, needStrconv := parseFmtString([]rune(data), ret)
+									needStrconvImport = needStrconv
+
+									data = string(newData)
+									args = append(args, &ast.CompositeLit{
+										Type: &ast.MapType{
+											Key: &ast.BasicLit{
+												Kind:  token.STRING,
+												Value: "string",
+											},
+											Value: &ast.BasicLit{
+												Kind:  token.STRING,
+												Value: "string",
+											},
+										},
+										Elts: mapData,
+									})
 								}
 								for lang := range newData {
 									newData[lang][name][itemName] = Value{
 										Id:      counter,
 										Name:    itemName,
-										Value:   data[lang][val].Value,
-										Comment: data[lang][val].Comment,
+										Value:   data, // TODO: only set data for default english?
+										Comment: itemName,
 									}
 								}
 								dataNames[name] = append(dataNames[name], itemName)
-								arg.Value = strconv.Quote(itemName)
-								cursor.Replace(n)
+
+								ret = &ast.CallExpr{
+									Fun: &ast.SelectorExpr{
+										X: &ast.Ident{
+											Name: "goloc",
+										},
+										Sel: &ast.Ident{
+											Name: methToCall,
+										},
+									},
+									Args: args,
+								}
+								cursor.Replace(ret)
+								needsImporting = true
+								needsSetting = true
 							}
-						} else {
-							logrus.Debugf("\n   found an unexpected subcall method: %T, %+v", ex, ex)
 						}
-					} else {
-						logrus.Debugf("\n   found something else: %T", ex)
 					}
 				}
 			}
@@ -546,4 +607,13 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 
 func sep(s string) string {
 	return string(filepath.Separator) + s + string(filepath.Separator)
+}
+
+func contains(ss []string, s string) bool {
+	for _, x := range ss {
+		if s == x {
+			return true
+		}
+	}
+	return false
 }

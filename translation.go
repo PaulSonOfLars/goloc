@@ -2,6 +2,7 @@ package goloc
 
 import (
 	"encoding/xml"
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
@@ -25,9 +26,23 @@ func Trnlf(lang string, trnlVal string, dataMap map[string]string) string {
 	return repl.Replace(data[lang][trnlVal].Value)
 }
 
+func Add(text string) string {
+	logrus.Warn("unloaded translation string for Add()")
+	return text
+}
+
+func Addf(text string, format ...interface{}) string {
+	logrus.Warn("unloaded translation string for Addf()")
+	return fmt.Sprintf(text, format)
+}
+
 func Load(moduleToLoad string) {
 	files, err := ioutil.ReadDir(translationDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+
 		logrus.Fatal(err)
 		return
 	}
@@ -35,6 +50,9 @@ func Load(moduleToLoad string) {
 		func() {
 			f, err := os.Open(path.Join(translationDir, x.Name(), strings.TrimSuffix(moduleToLoad, path.Ext(moduleToLoad))+".xml"))
 			if err != nil {
+				if os.IsNotExist(err) {
+					return
+				}
 				logrus.Fatal(err)
 				return
 			}
