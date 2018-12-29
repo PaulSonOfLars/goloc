@@ -191,7 +191,6 @@ func (l *Locer) Fix(node *ast.File) {
 
 				// Check method calls
 			} else if ret, ok := n.(*ast.CallExpr); ok {
-
 				// determine if method is one of the validated ones
 				if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
 					logrus.Debug("\n  found random call named " + f.Sel.Name)
@@ -270,6 +269,7 @@ func (l *Locer) Fix(node *ast.File) {
 							cursor.Replace(ret)
 							needsImporting = true
 							needsSetting = true
+							return false
 
 							// if not a string, but a binop:
 						} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
@@ -287,7 +287,6 @@ func (l *Locer) Fix(node *ast.File) {
 									logrus.Fatal(err)
 									return true
 								}
-
 								counter++ // todo: remove duplicate counter increment
 								itemName := name + ":" + strconv.Itoa(counter)
 								for lang := range newData {
@@ -301,6 +300,7 @@ func (l *Locer) Fix(node *ast.File) {
 								dataNames[name] = append(dataNames[name], itemName)
 								arg.Value = strconv.Quote(itemName)
 								cursor.Replace(n)
+								return false
 							}
 						} else if f.Sel.Name == "Add" || f.Sel.Name == "Addf" {
 							if v, ok := ret.Args[0].(*ast.BasicLit); ok {
@@ -366,6 +366,7 @@ func (l *Locer) Fix(node *ast.File) {
 								cursor.Replace(ret)
 								needsImporting = true
 								needsSetting = true
+								return false
 							}
 						}
 					}
@@ -557,7 +558,6 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 			for i := 0; i < len(xmlData.Rows); i++ {
 				xmlData.Rows[i].Comment = xmlData.Rows[i].Value
 				xmlData.Rows[i].Value = ""
-
 			}
 
 			filename := strings.Replace(fpath, sep(l.DefaultLang.String()), sep(lang.String()), 1)

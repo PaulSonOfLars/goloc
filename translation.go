@@ -7,10 +7,12 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"sort"
 	"strings"
 )
 
 var data = make(map[string]map[string]Value)
+var languages []string
 
 // todo: get some defaul values going
 func Trnl(lang string, trnlVal string) string {
@@ -72,4 +74,21 @@ func Load(moduleToLoad string) {
 			}
 		}()
 	}
+}
+
+func Languages() (ss []string) {
+	if languages != nil {
+		return languages
+	}
+	for k := range data {
+		ss = append(ss, k)
+	}
+	sort.Strings(ss)
+	languages = ss
+	return ss
+}
+
+func IsLangSupported(s string) bool {
+	_, ok := data[s]
+	return ok
 }
