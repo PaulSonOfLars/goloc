@@ -495,7 +495,7 @@ func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataName
 }
 func (l *Locer) Create(args []string, lang language.Tag) {
 	err := filepath.Walk(path.Join(translationDir, l.DefaultLang.String()),
-		func(filepath string, info os.FileInfo, err error) error {
+		func(fpath string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -503,7 +503,7 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 				return nil
 			}
 
-			f, err := os.Open(filepath)
+			f, err := os.Open(fpath)
 			if err != nil {
 				return err
 			}
@@ -521,7 +521,7 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 
 			}
 
-			filename := strings.Replace(filepath, l.DefaultLang.String(), lang.String(), 1)
+			filename := strings.Replace(fpath, sep(l.DefaultLang.String()), sep(lang.String()), 1)
 
 			if err := os.MkdirAll(path.Dir(filename), 0755); err != nil {
 				return err
@@ -542,4 +542,8 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 	if err != nil {
 		logrus.Fatal(err)
 	}
+}
+
+func sep(s string) string {
+	return string(filepath.Separator) + s + string(filepath.Separator)
 }
