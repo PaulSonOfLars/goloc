@@ -14,10 +14,14 @@ import (
 var data = make(map[string]map[string]Value)
 var dataCount = make(map[string]int)
 var languages []string
+var DefaultLang = "en-GB"
 
-// todo: get some defaul values going
 func Trnl(lang string, trnlVal string) string {
-	return data[lang][trnlVal].Value
+	v, ok := data[lang][trnlVal]
+	if !ok || v.Value == "" {
+		return data[DefaultLang][trnlVal].Value
+	}
+	return v.Value
 }
 
 func Trnlf(lang string, trnlVal string, dataMap map[string]string) string {
@@ -26,7 +30,11 @@ func Trnlf(lang string, trnlVal string, dataMap map[string]string) string {
 		replData = append(replData, "{"+k+"}", v)
 	}
 	repl := strings.NewReplacer(replData...)
-	return repl.Replace(data[lang][trnlVal].Value)
+	v, ok := data[lang][trnlVal]
+	if !ok || v.Value == "" {
+		return repl.Replace(data[DefaultLang][trnlVal].Value)
+	}
+	return repl.Replace(v.Value)
 }
 
 func Add(text string) string {
