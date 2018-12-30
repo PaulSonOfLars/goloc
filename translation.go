@@ -12,6 +12,7 @@ import (
 )
 
 var data = make(map[string]map[string]Value)
+var dataCount = make(map[string]int)
 var languages []string
 
 // todo: get some defaul values going
@@ -71,6 +72,13 @@ func Load(moduleToLoad string) {
 					data[path.Base(x.Name())] = make(map[string]Value)
 				}
 				data[path.Base(x.Name())][row.Name] = row
+			}
+			count := xmlData.Counter
+			if count <= 0 {
+				count = len(xmlData.Rows)
+			}
+			if dataCount[moduleToLoad] < count {
+				dataCount[moduleToLoad] = count
 			}
 		}()
 	}

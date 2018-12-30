@@ -23,6 +23,7 @@ const translationDir = "trans"
 type Translation struct {
 	XMLName xml.Name `xml:"translation"`
 	Rows    []Value
+	Counter int
 }
 
 type Value struct {
@@ -161,7 +162,7 @@ func (l *Locer) Fix(node *ast.File) {
 	// todo: check init load works as expected
 
 	Load(name) // load current values
-
+	logrus.Debug("module count at", dataCount[name])
 	newData := make(map[string]map[string]map[string]Value) // locale:(filename:(trigger:Value))
 	dataNames := make(map[string][]string)                  // filename:[]triggers
 
@@ -172,7 +173,6 @@ func (l *Locer) Fix(node *ast.File) {
 		newData[k][name] = make(map[string]Value)
 	}
 
-	var counter int            // translation counter value
 	var needsSetting bool      // method needs the lang := arg
 	var needsImporting bool    // goloc needs importing
 	var needStrconvImport bool // need to import strconv
@@ -210,8 +210,8 @@ func (l *Locer) Fix(node *ast.File) {
 								return true
 							}
 
-							counter++
-							itemName := name + ":" + strconv.Itoa(counter)
+							dataCount[name]++
+							itemName := name + ":" + strconv.Itoa(dataCount[name])
 							args := []ast.Expr{
 								&ast.Ident{
 									Name: "lang",
@@ -246,12 +246,20 @@ func (l *Locer) Fix(node *ast.File) {
 
 							for lang := range newData {
 								newData[lang][name][itemName] = Value{
-									Id:      counter,
+									Id:      dataCount[name],
 									Name:    itemName,
-									Value:   data, // TODO: only set data for default english?
-									Comment: itemName,
+									Value:   "",
+									Comment: data,
 								}
 							}
+							// set data only for default value
+							newData[l.DefaultLang.String()][name][itemName] = Value{
+								Id:      dataCount[name],
+								Name:    itemName,
+								Value:   data,
+								Comment: itemName,
+							}
+
 							dataNames[name] = append(dataNames[name], itemName)
 
 							ret.Args = []ast.Expr{&ast.CallExpr{
@@ -287,18 +295,12 @@ func (l *Locer) Fix(node *ast.File) {
 									logrus.Fatal(err)
 									return true
 								}
-								counter++ // todo: remove duplicate counter increment
-								itemName := name + ":" + strconv.Itoa(counter)
+								// add curr data to the new data (this will remove unused vals)
 								for lang := range newData {
-									newData[lang][name][itemName] = Value{
-										Id:      counter,
-										Name:    itemName,
-										Value:   data[lang][val].Value,
-										Comment: data[lang][val].Comment,
-									}
+									newData[lang][name][val] = data[lang][val]
 								}
-								dataNames[name] = append(dataNames[name], itemName)
-								arg.Value = strconv.Quote(itemName)
+								dataNames[name] = append(dataNames[name], val)
+								arg.Value = strconv.Quote(val)
 								cursor.Replace(n)
 								return false
 							}
@@ -310,8 +312,8 @@ func (l *Locer) Fix(node *ast.File) {
 									return true
 								}
 								// TODO: all this is duplicated stuff from the other one
-								counter++
-								itemName := name + ":" + strconv.Itoa(counter)
+								dataCount[name]++
+								itemName := name + ":" + strconv.Itoa(dataCount[name])
 								args := []ast.Expr{
 									&ast.Ident{
 										Name: "lang",
@@ -344,7 +346,7 @@ func (l *Locer) Fix(node *ast.File) {
 								}
 								for lang := range newData {
 									newData[lang][name][itemName] = Value{
-										Id:      counter,
+										Id:      dataCount[name],
 										Name:    itemName,
 										Value:   data, // TODO: only set data for default english?
 										Comment: itemName,
@@ -501,6 +503,7 @@ func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataName
 				}
 				xmlOutput.Rows = append(xmlOutput.Rows, langData)
 			}
+			xmlOutput.Counter = dataCount[name]
 
 			err := func() error {
 				// TODO: other filetypes than xml
