@@ -38,7 +38,6 @@ type Locer struct {
 	Funcs       []string
 	Fmtfuncs    []string
 	Checked     map[string]struct{}
-	//Nodes       map[string]ToEdit
 	OrderedVals []string
 	Fset        *token.FileSet
 	Apply       bool
@@ -159,15 +158,19 @@ func (l *Locer) Fix(node *ast.File) {
 		},
 	}
 
-	// todo: check init load works as expected
+	// todo: avoid duplicate loads in init calls
+	// todo: investigate unnecessary "lang := " loads
 
 	Load(name) // load current values
 	logrus.Debug("module count at", dataCount[name])
 	newData := make(map[string]map[string]map[string]Value) // locale:(filename:(trigger:Value))
 	dataNames := make(map[string][]string)                  // filename:[]triggers
+	noDupStrings := make(map[string]string)                 // map of currently loaded strings, to avoid duplicates and reduce translation efforts
 
+	// make sure default language is loaded
 	newData[l.DefaultLang.String()] = make(map[string]map[string]Value)
 	newData[l.DefaultLang.String()][name] = make(map[string]Value)
+	// initialise set for all other languages
 	for k := range data { // initialise all languages
 		newData[k] = make(map[string]map[string]Value)
 		newData[k][name] = make(map[string]Value)
@@ -210,8 +213,31 @@ func (l *Locer) Fix(node *ast.File) {
 								return true
 							}
 
-							dataCount[name]++
-							itemName := name + ":" + strconv.Itoa(dataCount[name])
+							itemName, ok := noDupStrings[data]
+							if !ok {
+								dataCount[name]++
+								itemName = name + ":" + strconv.Itoa(dataCount[name])
+								noDupStrings[data] = itemName
+
+								for lang := range newData {
+									newData[lang][name][itemName] = Value{
+										Id:      dataCount[name],
+										Name:    itemName,
+										Value:   "",
+										Comment: data,
+									}
+								}
+								// set data only for default value
+								newData[l.DefaultLang.String()][name][itemName] = Value{
+									Id:      dataCount[name],
+									Name:    itemName,
+									Value:   data,
+									Comment: itemName,
+								}
+
+								dataNames[name] = append(dataNames[name], itemName)
+							}
+
 							args := []ast.Expr{
 								&ast.Ident{
 									Name: "lang",
@@ -243,24 +269,6 @@ func (l *Locer) Fix(node *ast.File) {
 									Elts: mapData,
 								})
 							}
-
-							for lang := range newData {
-								newData[lang][name][itemName] = Value{
-									Id:      dataCount[name],
-									Name:    itemName,
-									Value:   "",
-									Comment: data,
-								}
-							}
-							// set data only for default value
-							newData[l.DefaultLang.String()][name][itemName] = Value{
-								Id:      dataCount[name],
-								Name:    itemName,
-								Value:   data,
-								Comment: itemName,
-							}
-
-							dataNames[name] = append(dataNames[name], itemName)
 
 							ret.Args = []ast.Expr{&ast.CallExpr{
 								Fun: &ast.SelectorExpr{
@@ -295,11 +303,18 @@ func (l *Locer) Fix(node *ast.File) {
 									logrus.Fatal(err)
 									return true
 								}
-								// add curr data to the new data (this will remove unused vals)
-								for lang := range newData {
-									newData[lang][name][val] = data[lang][val]
+								itemName, ok := noDupStrings[data[l.DefaultLang.String()][val].Value]
+								if ok {
+									val = itemName
+								} else {
+									noDupStrings[data[l.DefaultLang.String()][val].Value] = val
+									// add curr data to the new data (this will remove unused vals)
+									for lang := range newData {
+										newData[lang][name][val] = data[lang][val]
+									}
+									dataNames[name] = append(dataNames[name], val)
 								}
-								dataNames[name] = append(dataNames[name], val)
+
 								arg.Value = strconv.Quote(val)
 								cursor.Replace(n)
 								return false
@@ -311,9 +326,32 @@ func (l *Locer) Fix(node *ast.File) {
 									logrus.Fatal(err)
 									return true
 								}
-								// TODO: all this is duplicated stuff from the other one
-								dataCount[name]++
-								itemName := name + ":" + strconv.Itoa(dataCount[name])
+
+								itemName, ok := noDupStrings[data]
+								if !ok {
+									dataCount[name]++
+									itemName := name + ":" + strconv.Itoa(dataCount[name])
+									noDupStrings[data] = itemName
+
+									for lang := range newData {
+										newData[lang][name][itemName] = Value{
+											Id:      dataCount[name],
+											Name:    itemName,
+											Value:   "",
+											Comment: data,
+										}
+									}
+									// set data only for default value
+									newData[l.DefaultLang.String()][name][itemName] = Value{
+										Id:      dataCount[name],
+										Name:    itemName,
+										Value:   data,
+										Comment: itemName,
+									}
+
+									dataNames[name] = append(dataNames[name], itemName)
+								}
+
 								args := []ast.Expr{
 									&ast.Ident{
 										Name: "lang",
@@ -344,15 +382,6 @@ func (l *Locer) Fix(node *ast.File) {
 										Elts: mapData,
 									})
 								}
-								for lang := range newData {
-									newData[lang][name][itemName] = Value{
-										Id:      dataCount[name],
-										Name:    itemName,
-										Value:   data, // TODO: only set data for default english?
-										Comment: itemName,
-									}
-								}
-								dataNames[name] = append(dataNames[name], itemName)
 
 								ret = &ast.CallExpr{
 									Fun: &ast.SelectorExpr{
