@@ -152,8 +152,8 @@ func (l *Locer) Fix(node *ast.File) {
 			},
 			Args: []ast.Expr{
 				&ast.BasicLit{
-					Kind:     token.STRING,
-					Value:    strconv.Quote(name),
+					Kind:  token.STRING,
+					Value: strconv.Quote(name),
 				},
 			},
 		},
@@ -540,6 +540,10 @@ func initHasLoad(ret *ast.FuncDecl, modName string) bool {
 func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataNames map[string][]string) error {
 	for lang, filenameMap := range newData {
 		for name, data := range filenameMap {
+			if len(dataNames[name]) == 0 {
+				continue
+			}
+
 			var xmlOutput Translation
 			for _, k := range dataNames[name] {
 				langData := data[k]
