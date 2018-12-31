@@ -330,7 +330,7 @@ func (l *Locer) Fix(node *ast.File) {
 								itemName, ok := noDupStrings[data]
 								if !ok {
 									dataCount[name]++
-									itemName := name + ":" + strconv.Itoa(dataCount[name])
+									itemName = name + ":" + strconv.Itoa(dataCount[name])
 									noDupStrings[data] = itemName
 
 									for lang := range newData {
