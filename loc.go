@@ -151,14 +151,14 @@ func (l *Locer) Fix(node *ast.File) {
 				},
 			},
 			Args: []ast.Expr{
-				&ast.Ident{
-					Name: strconv.Quote(name),
+				&ast.BasicLit{
+					Kind:     token.STRING,
+					Value:    strconv.Quote(name),
 				},
 			},
 		},
 	}
 
-	// todo: avoid duplicate loads in init calls
 	// todo: investigate unnecessary "lang := " loads
 
 	Load(name) // load current values
@@ -180,7 +180,6 @@ func (l *Locer) Fix(node *ast.File) {
 	var needsImporting bool    // goloc needs importing
 	var needStrconvImport bool // need to import strconv
 	var initExists bool        // does init method exist
-	var initSet bool           // has the init method been set
 
 	// should return to node?
 	astutil.Apply(node,
@@ -409,10 +408,11 @@ func (l *Locer) Fix(node *ast.File) {
 		/*post*/
 		func(cursor *astutil.Cursor) bool {
 			if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
-				if initExists && ret.Name.Name == "init" && !initSet && needsImporting {
-					ret.Body.List = append(ret.Body.List, cntnt)
-					cursor.Replace(ret)
-					initSet = true
+				if initExists && ret.Name.Name == "init" && needsImporting {
+					if !initHasLoad(ret, name) {
+						ret.Body.List = append(ret.Body.List, cntnt)
+						cursor.Replace(ret)
+					}
 				}
 
 				if len(ret.Body.List) == 0 {
@@ -457,7 +457,7 @@ func (l *Locer) Fix(node *ast.File) {
 	astutil.Apply(node, func(cursor *astutil.Cursor) bool {
 		return true
 	}, func(cursor *astutil.Cursor) bool {
-		if d, ok := cursor.Node().(*ast.GenDecl); ok && d.Tok == token.IMPORT && !initExists && !initSet && needsImporting {
+		if d, ok := cursor.Node().(*ast.GenDecl); ok && d.Tok == token.IMPORT && !initExists && needsImporting {
 			v := &ast.FuncDecl{
 				Name: &ast.Ident{
 					Name: "init",
@@ -476,13 +476,12 @@ func (l *Locer) Fix(node *ast.File) {
 				},
 			}
 			cursor.InsertAfter(v)
-			initSet = true
 		} else if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
-
-			if initExists && ret.Name.Name == "init" && !initSet && needsImporting {
-				ret.Body.List = append(ret.Body.List, cntnt)
-				cursor.Replace(ret)
-				initSet = true
+			if initExists && ret.Name.Name == "init" && needsImporting {
+				if !initHasLoad(ret, name) {
+					ret.Body.List = append(ret.Body.List, cntnt)
+					cursor.Replace(ret)
+				}
 			}
 		}
 		return true
@@ -518,6 +517,23 @@ func (l *Locer) Fix(node *ast.File) {
 		logrus.Fatal(err)
 		return
 	}
+}
+
+func initHasLoad(ret *ast.FuncDecl, modName string) bool {
+	for _, x := range ret.Body.List {
+		if exp, ok := x.(*ast.ExprStmt); ok {
+			if cexp, ok := exp.X.(*ast.CallExpr); ok {
+				val, ok2 := cexp.Args[0].(*ast.BasicLit)
+				if sexp, ok := cexp.Fun.(*ast.SelectorExpr); ok && ok2 && val.Value == strconv.Quote(modName) {
+					obj, ok1 := sexp.X.(*ast.Ident)
+					if ok1 && obj.Name == "goloc" && sexp.Sel.Name == "Load" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // todo: simplify the newData structure
