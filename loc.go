@@ -250,10 +250,10 @@ func (l *Locer) Fix(node *ast.File) {
 							methToCall := "Trnl"
 							if contains(l.Fmtfuncs, f.Sel.Name) { // is a format call
 								methToCall = "Trnlf"
-								newData, mapData, needStrconv := parseFmtString([]rune(data), ret)
+								dataNew, mapData, needStrconv := parseFmtString([]rune(data), ret)
 								needStrconvImport = needStrconv
 
-								data = string(newData)
+								data = string(dataNew)
 								args = append(args, &ast.CompositeLit{
 									Type: &ast.MapType{
 										Key: &ast.BasicLit{
@@ -267,6 +267,22 @@ func (l *Locer) Fix(node *ast.File) {
 									},
 									Elts: mapData,
 								})
+								// todo: remove duplicate for loop
+								for lang := range newData {
+									newData[lang][name][itemName] = Value{
+										Id:      dataCount[name],
+										Name:    itemName,
+										Value:   "",
+										Comment: data,
+									}
+								}
+								// set data only for default value
+								newData[l.DefaultLang.String()][name][itemName] = Value{
+									Id:      dataCount[name],
+									Name:    itemName,
+									Value:   data,
+									Comment: itemName,
+								}
 							}
 
 							ret.Args = []ast.Expr{&ast.CallExpr{
@@ -309,7 +325,17 @@ func (l *Locer) Fix(node *ast.File) {
 									noDupStrings[data[l.DefaultLang.String()][val].Value] = val
 									// add curr data to the new data (this will remove unused vals)
 									for lang := range newData {
-										newData[lang][name][val] = data[lang][val]
+										currVal, ok := data[lang][val]
+										if !ok {
+											defLangVal := data[l.DefaultLang.String()][val]
+											currVal = Value{
+												Id:      defLangVal.Id,
+												Name:    defLangVal.Name,
+												Value:   "",
+												Comment: defLangVal.Value,
+											}
+										}
+										newData[lang][name][val] = currVal
 									}
 									dataNames[name] = append(dataNames[name], val)
 								}
@@ -363,10 +389,10 @@ func (l *Locer) Fix(node *ast.File) {
 								methToCall := "Trnl"
 								if f.Sel.Name == "Addf" {
 									methToCall = "Trnlf"
-									newData, mapData, needStrconv := parseFmtString([]rune(data), ret)
+									dataNew, mapData, needStrconv := parseFmtString([]rune(data), ret)
 									needStrconvImport = needStrconv
 
-									data = string(newData)
+									data = string(dataNew)
 									args = append(args, &ast.CompositeLit{
 										Type: &ast.MapType{
 											Key: &ast.BasicLit{
@@ -380,6 +406,22 @@ func (l *Locer) Fix(node *ast.File) {
 										},
 										Elts: mapData,
 									})
+									// todo: this is the same loop as earlier, simply resetting data
+									for lang := range newData {
+										newData[lang][name][itemName] = Value{
+											Id:      dataCount[name],
+											Name:    itemName,
+											Value:   "",
+											Comment: data,
+										}
+									}
+									// set data only for default value
+									newData[l.DefaultLang.String()][name][itemName] = Value{
+										Id:      dataCount[name],
+										Name:    itemName,
+										Value:   data,
+										Comment: itemName,
+									}
 								}
 
 								ret = &ast.CallExpr{
