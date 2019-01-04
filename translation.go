@@ -44,7 +44,7 @@ func Add(text string) string {
 
 func Addf(text string, format ...interface{}) string {
 	logrus.Warn("unloaded translation string for Addf()")
-	return fmt.Sprintf(text, format)
+	return fmt.Sprintf(text, format...)
 }
 
 func Load(moduleToLoad string) {
