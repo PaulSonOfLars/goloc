@@ -55,7 +55,9 @@ func main() {
 		Use:   "extract",
 		Short: "extract all strings",
 		Run: func(cmd *cobra.Command, args []string) {
-			l.Handle(args, l.Fix)
+			if err := l.Handle(args, l.Fix); err != nil {
+				logrus.Fatal(err)
+			}
 		},
 	})
 
@@ -77,8 +79,34 @@ func main() {
 		},
 	}
 	createCmd.Flags().StringVarP(&createLang, "create", "c", "", "select which language to create")
-
 	rootCmd.AddCommand(createCmd)
+
+	checkLang := "all"
+	checkCmd := &cobra.Command{
+		Use:"check",
+		Short: "Check integrity of language files",
+		Run: func(cmd *cobra.Command, args []string) {
+			var err error
+			if checkLang == "all" {
+				err = l.CheckAll()
+				// load all, iterate over language code
+				// check all
+			} else {
+				lang := language.Make(checkLang)
+				if lang == language.Und {
+					logrus.Fatalf("invalid language selected: '%s' does not match any known language codes")
+				}
+				// load default, and load lang, check
+				err = l.Check(lang)
+			}
+			if err != nil {
+				logrus.Fatal(err)
+			}
+
+		},
+	}
+	checkCmd.Flags().StringVarP(&checkLang, "check", "c", "all", "select which language to check")
+	rootCmd.AddCommand(checkCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)

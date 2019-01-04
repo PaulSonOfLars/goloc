@@ -3,6 +3,7 @@ package goloc
 import (
 	"bytes"
 	"encoding/xml"
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"go/ast"
 	"go/format"
@@ -672,6 +673,32 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 	if err != nil {
 		logrus.Fatal(err)
 	}
+}
+
+func (l *Locer) CheckAll() error {
+	LoadAll(l.DefaultLang.String())
+	fmt.Println(len(data))
+	fmt.Println(len(data[l.DefaultLang.String()]))
+
+	// TODO: check all inputs contain correct {} tags
+	// TODO: check all inputs have the html tags escaped right; & < > ' "
+	// TODO: check all inputs have valid newlines
+	// TODO: check all inputs have start/end whitespace
+	// TODO: investigate changing decoder
+	return nil
+}
+
+func (l *Locer) Check(lang language.Tag) error {
+	LoadLangAll(l.DefaultLang.String())
+	LoadLangAll(lang.String())
+	fmt.Println(len(data))
+	fmt.Println(len(data[l.DefaultLang.String()]))
+
+
+	// TODO: check all inputs contain correct {} tags
+	// TODO: check all inputs have the html tags escaped right; & < > ' "
+	// TODO: investigate changing decoder
+	return nil
 }
 
 func sep(s string) string {

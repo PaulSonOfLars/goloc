@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -47,6 +48,84 @@ func Addf(text string, format ...interface{}) string {
 	return fmt.Sprintf(text, format...)
 }
 
+func LoadAll(defLang string) {
+	base := path.Join(translationDir, defLang)
+	err := filepath.Walk(base,
+		func(fpath string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+			relPath, err := filepath.Rel(base, fpath)
+			if err != nil {
+				logrus.Fatal(err)
+			}
+			Load(relPath)
+			//Load(info.Name())
+			return nil
+		})
+	if err != nil {
+		logrus.Fatal(err)
+	}
+}
+
+func LoadLangAll(lang string) {
+	base := path.Join(translationDir, lang)
+	err := filepath.Walk(base,
+		func(fpath string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+			relPath, err := filepath.Rel(base, fpath)
+			if err != nil {
+				logrus.Fatal(err)
+			}
+			LoadLangModule(lang, relPath)
+			//Load(info.Name())
+			return nil
+		})
+	if err != nil {
+		logrus.Fatal(err)
+	}
+}
+
+func LoadLangModule(lang string, moduleName string) {
+	f, err := os.Open(path.Join(translationDir, lang, strings.TrimSuffix(moduleName, path.Ext(moduleName))+".xml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		logrus.Fatal(err)
+		return
+	}
+	defer f.Close()
+	dec := xml.NewDecoder(f)
+	var xmlData Translation
+	err = dec.Decode(&xmlData)
+	if err != nil {
+		logrus.Fatal(err)
+		return
+	}
+	for _, row := range xmlData.Rows {
+		if _, ok := data[path.Base(lang)]; !ok {
+			data[path.Base(lang)] = make(map[string]Value)
+		}
+		data[path.Base(lang)][row.Name] = row
+	}
+	count := xmlData.Counter
+	if count <= 0 {
+		count = len(xmlData.Rows)
+	}
+	if dataCount[moduleName] < count {
+		dataCount[moduleName] = count
+	}
+}
+
 func Load(moduleToLoad string) {
 	files, err := ioutil.ReadDir(translationDir)
 	if err != nil {
@@ -58,37 +137,7 @@ func Load(moduleToLoad string) {
 		return
 	}
 	for _, x := range files {
-		func() {
-			f, err := os.Open(path.Join(translationDir, x.Name(), strings.TrimSuffix(moduleToLoad, path.Ext(moduleToLoad))+".xml"))
-			if err != nil {
-				if os.IsNotExist(err) {
-					return
-				}
-				logrus.Fatal(err)
-				return
-			}
-			defer f.Close()
-			dec := xml.NewDecoder(f)
-			var xmlData Translation
-			err = dec.Decode(&xmlData)
-			if err != nil {
-				logrus.Fatal(err)
-				return
-			}
-			for _, row := range xmlData.Rows {
-				if _, ok := data[path.Base(x.Name())]; !ok {
-					data[path.Base(x.Name())] = make(map[string]Value)
-				}
-				data[path.Base(x.Name())][row.Name] = row
-			}
-			count := xmlData.Counter
-			if count <= 0 {
-				count = len(xmlData.Rows)
-			}
-			if dataCount[moduleToLoad] < count {
-				dataCount[moduleToLoad] = count
-			}
-		}()
+		LoadLangModule(x.Name(), moduleToLoad)
 	}
 }
 
