@@ -547,9 +547,6 @@ func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataName
 			var xmlOutput Translation
 			for _, k := range dataNames[name] {
 				langData := data[k]
-				if lang != l.DefaultLang.String() { // do not set english string for non-english languages
-					langData.Value = ""
-				}
 				xmlOutput.Rows = append(xmlOutput.Rows, langData)
 			}
 			xmlOutput.Counter = dataCount[name]
