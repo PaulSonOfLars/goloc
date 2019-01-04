@@ -138,18 +138,18 @@ func (l *Locer) Inspect(node *ast.File) {
 	logrus.Debugln()
 }
 
+var newData map[string]map[string]map[string]Value // locale:(filename:(trigger:Value))
+var dataNames map[string][]string                  // filename:[]triggers
+var noDupStrings map[string]string                 // map of currently loaded strings, to avoid duplicates and reduce translation efforts
+
 // todo: ensure import works as expected
 func (l *Locer) Fix(node *ast.File) {
 	name := l.Fset.File(node.Pos()).Name()
 	cntnt := &ast.ExprStmt{
 		X: &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
-				X: &ast.Ident{
-					Name: "goloc",
-				},
-				Sel: &ast.Ident{
-					Name: "Load",
-				},
+				X:   &ast.Ident{Name: "goloc"},
+				Sel: &ast.Ident{Name: "Load"},
 			},
 			Args: []ast.Expr{
 				&ast.BasicLit{
@@ -164,9 +164,9 @@ func (l *Locer) Fix(node *ast.File) {
 
 	Load(name) // load current values
 	logrus.Debug("module count at", dataCount[name])
-	newData := make(map[string]map[string]map[string]Value) // locale:(filename:(trigger:Value))
-	dataNames := make(map[string][]string)                  // filename:[]triggers
-	noDupStrings := make(map[string]string)                 // map of currently loaded strings, to avoid duplicates and reduce translation efforts
+	newData = make(map[string]map[string]map[string]Value) // locale:(filename:(trigger:Value))
+	dataNames = make(map[string][]string)                  // filename:[]triggers
+	noDupStrings = make(map[string]string)                 // map of currently loaded strings, to avoid duplicates and reduce translation efforts
 
 	// make sure default language is loaded
 	newData[l.DefaultLang.String()] = make(map[string]map[string]Value)
@@ -205,98 +205,9 @@ func (l *Locer) Fix(node *ast.File) {
 						if v, ok := ex.(*ast.BasicLit); ok && v.Kind == token.STRING {
 							buf := bytes.NewBuffer([]byte{})
 							printer.Fprint(buf, l.Fset, v)
-							logrus.Debugf("\n   found a string:\n%s", buf.String())
+							logrus.Debugf("\n   found a string in funcname %s:\n%s", f.Sel.Name, buf.String())
 
-							data, err := strconv.Unquote(v.Value)
-							if err != nil {
-								logrus.Fatal(err)
-								return true
-							}
-
-							itemName, ok := noDupStrings[data]
-							if !ok {
-								dataCount[name]++
-								itemName = name + ":" + strconv.Itoa(dataCount[name])
-								noDupStrings[data] = itemName
-
-								for lang := range newData {
-									newData[lang][name][itemName] = Value{
-										Id:      dataCount[name],
-										Name:    itemName,
-										Value:   "",
-										Comment: data,
-									}
-								}
-								// set data only for default value
-								newData[l.DefaultLang.String()][name][itemName] = Value{
-									Id:      dataCount[name],
-									Name:    itemName,
-									Value:   data,
-									Comment: itemName,
-								}
-
-								dataNames[name] = append(dataNames[name], itemName)
-							}
-
-							args := []ast.Expr{
-								&ast.Ident{
-									Name: "lang",
-								},
-								&ast.BasicLit{
-									Kind:  token.STRING,
-									Value: strconv.Quote(itemName),
-								},
-							}
-
-							methToCall := "Trnl"
-							if contains(l.Fmtfuncs, f.Sel.Name) { // is a format call
-								methToCall = "Trnlf"
-								dataNew, mapData, needStrconv := parseFmtString([]rune(data), ret)
-								needStrconvImport = needStrconv
-
-								data = string(dataNew)
-								args = append(args, &ast.CompositeLit{
-									Type: &ast.MapType{
-										Key: &ast.BasicLit{
-											Kind:  token.STRING,
-											Value: "string",
-										},
-										Value: &ast.BasicLit{
-											Kind:  token.STRING,
-											Value: "string",
-										},
-									},
-									Elts: mapData,
-								})
-								// todo: remove duplicate for loop
-								for lang := range newData {
-									newData[lang][name][itemName] = Value{
-										Id:      dataCount[name],
-										Name:    itemName,
-										Value:   "",
-										Comment: data,
-									}
-								}
-								// set data only for default value
-								newData[l.DefaultLang.String()][name][itemName] = Value{
-									Id:      dataCount[name],
-									Name:    itemName,
-									Value:   data,
-									Comment: itemName,
-								}
-							}
-
-							ret.Args = []ast.Expr{&ast.CallExpr{
-								Fun: &ast.SelectorExpr{
-									X: &ast.Ident{
-										Name: "goloc",
-									},
-									Sel: &ast.Ident{
-										Name: methToCall,
-									},
-								},
-								Args: args,
-							}}
+							ret, needStrconvImport = l.injectTran(name, ret, f, v)
 
 							cursor.Replace(ret)
 							needsImporting = true
@@ -347,95 +258,12 @@ func (l *Locer) Fix(node *ast.File) {
 							}
 						} else if f.Sel.Name == "Add" || f.Sel.Name == "Addf" {
 							if v, ok := ret.Args[0].(*ast.BasicLit); ok {
-								data, err := strconv.Unquote(v.Value)
-								if err != nil {
-									logrus.Fatal(err)
-									return true
-								}
+								buf := bytes.NewBuffer([]byte{})
+								printer.Fprint(buf, l.Fset, v)
+								logrus.Debugf("\n   found a string to add via Add(f):\n%s", buf.String())
 
-								itemName, ok := noDupStrings[data]
-								if !ok {
-									dataCount[name]++
-									itemName = name + ":" + strconv.Itoa(dataCount[name])
-									noDupStrings[data] = itemName
+								ret, needStrconvImport = l.injectTran(name, ret, f, v)
 
-									for lang := range newData {
-										newData[lang][name][itemName] = Value{
-											Id:      dataCount[name],
-											Name:    itemName,
-											Value:   "",
-											Comment: data,
-										}
-									}
-									// set data only for default value
-									newData[l.DefaultLang.String()][name][itemName] = Value{
-										Id:      dataCount[name],
-										Name:    itemName,
-										Value:   data,
-										Comment: itemName,
-									}
-
-									dataNames[name] = append(dataNames[name], itemName)
-								}
-
-								args := []ast.Expr{
-									&ast.Ident{
-										Name: "lang",
-									},
-									&ast.BasicLit{
-										Kind:  token.STRING,
-										Value: strconv.Quote(itemName),
-									},
-								}
-								methToCall := "Trnl"
-								if f.Sel.Name == "Addf" {
-									methToCall = "Trnlf"
-									dataNew, mapData, needStrconv := parseFmtString([]rune(data), ret)
-									needStrconvImport = needStrconv
-
-									data = string(dataNew)
-									args = append(args, &ast.CompositeLit{
-										Type: &ast.MapType{
-											Key: &ast.BasicLit{
-												Kind:  token.STRING,
-												Value: "string",
-											},
-											Value: &ast.BasicLit{
-												Kind:  token.STRING,
-												Value: "string",
-											},
-										},
-										Elts: mapData,
-									})
-									// todo: this is the same loop as earlier, simply resetting data
-									for lang := range newData {
-										newData[lang][name][itemName] = Value{
-											Id:      dataCount[name],
-											Name:    itemName,
-											Value:   "",
-											Comment: data,
-										}
-									}
-									// set data only for default value
-									newData[l.DefaultLang.String()][name][itemName] = Value{
-										Id:      dataCount[name],
-										Name:    itemName,
-										Value:   data,
-										Comment: itemName,
-									}
-								}
-
-								ret = &ast.CallExpr{
-									Fun: &ast.SelectorExpr{
-										X: &ast.Ident{
-											Name: "goloc",
-										},
-										Sel: &ast.Ident{
-											Name: methToCall,
-										},
-									},
-									Args: args,
-								}
 								cursor.Replace(ret)
 								needsImporting = true
 								needsSetting = true
@@ -470,22 +298,13 @@ func (l *Locer) Fix(node *ast.File) {
 				logrus.Debugln("add lang to " + name)
 				ret.Body.List = append([]ast.Stmt{
 					&ast.AssignStmt{
-						Lhs: []ast.Expr{
-							&ast.Ident{
-								Name: "lang",
-							},
-						},
+						Lhs: []ast.Expr{&ast.Ident{Name: "lang"}},
 						Tok: token.DEFINE,
 						Rhs: []ast.Expr{
 							&ast.CallExpr{
-								Fun: &ast.Ident{
-									Name: "getLang", // todo: parameterise
+								Fun: &ast.Ident{Name: "getLang"}, // todo: parameterise
+								Args: []ast.Expr{&ast.Ident{Name: "u"}, // todo figure this bit out
 								},
-								Args: []ast.Expr{
-									&ast.Ident{
-										Name: "u",
-									},
-								}, // todo figure this bit out
 							},
 						},
 					},
@@ -502,21 +321,9 @@ func (l *Locer) Fix(node *ast.File) {
 	}, func(cursor *astutil.Cursor) bool {
 		if d, ok := cursor.Node().(*ast.GenDecl); ok && d.Tok == token.IMPORT && !initExists && needsImporting {
 			v := &ast.FuncDecl{
-				Name: &ast.Ident{
-					Name: "init",
-				},
-				Type: &ast.FuncType{
-					Params: &ast.FieldList{
-						List: []*ast.Field{},
-					},
-					Results: nil,
-				},
-				Body: &ast.BlockStmt{
-					List: []ast.Stmt{
-						cntnt,
-					},
-					Rbrace: 0,
-				},
+				Name: &ast.Ident{Name: "init"},
+				Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{}}},
+				Body: &ast.BlockStmt{List: []ast.Stmt{cntnt}},
 			}
 			cursor.InsertAfter(v)
 		} else if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
@@ -562,69 +369,6 @@ func (l *Locer) Fix(node *ast.File) {
 	}
 }
 
-func initHasLoad(ret *ast.FuncDecl, modName string) bool {
-	for _, x := range ret.Body.List {
-		if exp, ok := x.(*ast.ExprStmt); ok {
-			if cexp, ok := exp.X.(*ast.CallExpr); ok {
-				val, ok2 := cexp.Args[0].(*ast.BasicLit)
-				if sexp, ok := cexp.Fun.(*ast.SelectorExpr); ok && ok2 && val.Value == strconv.Quote(modName) {
-					obj, ok1 := sexp.X.(*ast.Ident)
-					if ok1 && obj.Name == "goloc" && sexp.Sel.Name == "Load" {
-						return true
-					}
-				}
-			}
-		}
-	}
-	return false
-}
-
-// todo: simplify the newData structure
-func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataNames map[string][]string) error {
-	for lang, filenameMap := range newData {
-		for name, data := range filenameMap {
-			if len(dataNames[name]) == 0 {
-				continue
-			}
-
-			var xmlOutput Translation
-			for _, k := range dataNames[name] {
-				langData := data[k]
-				xmlOutput.Rows = append(xmlOutput.Rows, langData)
-			}
-			xmlOutput.Counter = dataCount[name]
-
-			err := func() error {
-				// TODO: other filetypes than xml
-				enc := xml.NewEncoder(os.Stdout)
-				if l.Apply {
-					// TODO: choose translationDir
-					xmlName := strings.TrimSuffix(path.Join(translationDir, lang, name), path.Ext(name)) + ".xml"
-					err := os.MkdirAll(filepath.Dir(xmlName), 0755)
-					if err != nil {
-						return err
-					}
-					f, err := os.Create(xmlName)
-					if err != nil {
-						return err
-					}
-					defer f.Close()
-					// set encoding output
-					enc = xml.NewEncoder(f)
-				}
-				enc.Indent("", "    ")
-				if err := enc.Encode(xmlOutput); err != nil {
-					return err
-				}
-				return nil
-			}()
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
 func (l *Locer) Create(args []string, lang language.Tag) {
 	err := filepath.Walk(path.Join(translationDir, l.DefaultLang.String()),
 		func(fpath string, info os.FileInfo, err error) error {
@@ -694,22 +438,8 @@ func (l *Locer) Check(lang language.Tag) error {
 	fmt.Println(len(data))
 	fmt.Println(len(data[l.DefaultLang.String()]))
 
-
 	// TODO: check all inputs contain correct {} tags
 	// TODO: check all inputs have the html tags escaped right; & < > ' "
 	// TODO: investigate changing decoder
 	return nil
-}
-
-func sep(s string) string {
-	return string(filepath.Separator) + s + string(filepath.Separator)
-}
-
-func contains(ss []string, s string) bool {
-	for _, x := range ss {
-		if s == x {
-			return true
-		}
-	}
-	return false
 }
