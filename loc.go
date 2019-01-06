@@ -207,9 +207,11 @@ func (l *Locer) Fix(node *ast.File) {
 							printer.Fprint(buf, l.Fset, v)
 							logrus.Debugf("\n   found a string in funcname %s:\n%s", f.Sel.Name, buf.String())
 
-							ret, needStrconvImport = l.injectTran(name, ret, f, v)
+							args, needStrconvImportNew := l.injectTran(name, ret, f, v)
 
+							ret.Args = []ast.Expr{args}
 							cursor.Replace(ret)
+							needStrconvImport = needStrconvImportNew
 							needsImporting = true
 							needsSetting = true
 							return false

@@ -128,7 +128,7 @@ func (l *Locer) injectTran(name string, ret *ast.CallExpr, f *ast.SelectorExpr, 
 	}
 
 	methToCall := "Trnl"
-	if contains(l.Fmtfuncs, f.Sel.Name) { // is a format call
+	if contains(l.Fmtfuncs, f.Sel.Name) || f.Sel.Name == "Addf" { // is a format call
 		methToCall = "Trnlf"
 		dataNew, mapData, needStrconv := parseFmtString([]rune(data), ret)
 		needStrConvImport = needStrconv
@@ -167,14 +167,13 @@ func (l *Locer) injectTran(name string, ret *ast.CallExpr, f *ast.SelectorExpr, 
 		}
 	}
 
-	ret.Args = []ast.Expr{&ast.CallExpr{
+	return &ast.CallExpr{
 		Fun: &ast.SelectorExpr{
 			X:   &ast.Ident{Name: "goloc"},
 			Sel: &ast.Ident{Name: methToCall},
 		},
 		Args: args,
-	}}
-	return ret, needStrConvImport
+	}, needStrConvImport
 }
 
 // todo: simplify the newData structure
