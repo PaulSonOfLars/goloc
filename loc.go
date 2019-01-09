@@ -304,9 +304,9 @@ func (l *Locer) Fix(node *ast.File) {
 						Tok: token.DEFINE,
 						Rhs: []ast.Expr{
 							&ast.CallExpr{
-								Fun: &ast.Ident{Name: "getLang"}, // todo: parameterise
-								Args: []ast.Expr{&ast.Ident{Name: "u"}, // todo figure this bit out
-								},
+								Fun:  &ast.Ident{Name: "getLang"}, // todo: parameterise
+								Args: []ast.Expr{&ast.Ident{Name: "u"}},// todo figure this bit out
+
 							},
 						},
 					},
@@ -426,11 +426,12 @@ func (l *Locer) CheckAll() error {
 	fmt.Println(len(data))
 	fmt.Println(len(data[l.DefaultLang.String()]))
 
-	// TODO: check all inputs contain correct {} tags
-	// TODO: check all inputs have the html tags escaped right; & < > ' "
-	// TODO: check all inputs have valid newlines
-	// TODO: check all inputs have start/end whitespace
-	// TODO: investigate changing decoder
+	for k := range data {
+		lang := language.Make(k)
+		if err := l.check(lang); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -440,8 +441,17 @@ func (l *Locer) Check(lang language.Tag) error {
 	fmt.Println(len(data))
 	fmt.Println(len(data[l.DefaultLang.String()]))
 
+	return l.check(lang)
+}
+
+func (l *Locer) check(lang language.Tag) error {
+	if lang == l.DefaultLang { // don't check english
+		return nil
+	}
 	// TODO: check all inputs contain correct {} tags
 	// TODO: check all inputs have the html tags escaped right; & < > ' "
+	// TODO: check all inputs have valid newlines
+	// TODO: check all inputs have start/end whitespace
 	// TODO: investigate changing decoder
 	return nil
 }

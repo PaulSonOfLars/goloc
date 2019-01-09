@@ -14,7 +14,7 @@ func main() {
 	l := &goloc.Locer{
 		DefaultLang: language.BritishEnglish,
 		Checked:     make(map[string]struct{}),
-		Fset: token.NewFileSet(),
+		Fset:        token.NewFileSet(),
 	}
 	var lang string
 	verbose := false
@@ -83,7 +83,7 @@ func main() {
 
 	checkLang := "all"
 	checkCmd := &cobra.Command{
-		Use:"check",
+		Use:   "check",
 		Short: "Check integrity of language files",
 		Run: func(cmd *cobra.Command, args []string) {
 			var err error
