@@ -139,13 +139,13 @@ func (l *Locer) Inspect(node *ast.File) {
 }
 
 var newData map[string]map[string]map[string]Value // locale:(filename:(trigger:Value))
-var dataNames map[string][]string                  // filename:[]triggers
+var newDataNames map[string][]string               // filename:[]newtriggers
 var noDupStrings map[string]string                 // map of currently loaded strings, to avoid duplicates and reduce translation efforts
 
 // todo: ensure import works as expected
 func (l *Locer) Fix(node *ast.File) {
 	name := l.Fset.File(node.Pos()).Name()
-	cntnt := &ast.ExprStmt{
+	loadModuleExpr := &ast.ExprStmt{
 		X: &ast.CallExpr{
 			Fun: &ast.SelectorExpr{
 				X:   &ast.Ident{Name: "goloc"},
@@ -165,7 +165,7 @@ func (l *Locer) Fix(node *ast.File) {
 	Load(name) // load current values
 	logrus.Debug("module count at", dataCount[name])
 	newData = make(map[string]map[string]map[string]Value) // locale:(filename:(trigger:Value))
-	dataNames = make(map[string][]string)                  // filename:[]triggers
+	newDataNames = make(map[string][]string)               // filename:[]newtriggers
 	noDupStrings = make(map[string]string)                 // map of currently loaded strings, to avoid duplicates and reduce translation efforts
 
 	// make sure default language is loaded
@@ -225,6 +225,7 @@ func (l *Locer) Fix(node *ast.File) {
 							logrus.Debugf("\n   found something else: %T", ex)
 						}
 					} else if prev, ok := f.X.(*ast.Ident); ok && prev.Name == "goloc" {
+						// has already been translated, check if it isn't duplicated.
 						if f.Sel.Name == "Trnl" || f.Sel.Name == "Trnlf" {
 							if arg, ok := ret.Args[1].(*ast.BasicLit); ok && arg.Kind == token.STRING { // possible OOB
 								val, err := strconv.Unquote(arg.Value)
@@ -248,10 +249,10 @@ func (l *Locer) Fix(node *ast.File) {
 												Value:   "",
 												Comment: defLangVal.Value,
 											}
+											// add to old data list, so its added at the start and offsets aren't changed.
 										}
 										newData[lang][name][val] = currVal
 									}
-									dataNames[name] = append(dataNames[name], val)
 								}
 
 								arg.Value = strconv.Quote(val)
@@ -283,7 +284,7 @@ func (l *Locer) Fix(node *ast.File) {
 			if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
 				if initExists && ret.Name.Name == "init" && needsImporting {
 					if !initHasLoad(ret, name) {
-						ret.Body.List = append(ret.Body.List, cntnt)
+						ret.Body.List = append(ret.Body.List, loadModuleExpr)
 						cursor.Replace(ret)
 					}
 				}
@@ -304,9 +305,8 @@ func (l *Locer) Fix(node *ast.File) {
 						Tok: token.DEFINE,
 						Rhs: []ast.Expr{
 							&ast.CallExpr{
-								Fun:  &ast.Ident{Name: "getLang"}, // todo: parameterise
-								Args: []ast.Expr{&ast.Ident{Name: "u"}},// todo figure this bit out
-
+								Fun:  &ast.Ident{Name: "getLang"},       // todo: parameterise
+								Args: []ast.Expr{&ast.Ident{Name: "u"}}, // todo figure this bit out
 							},
 						},
 					},
@@ -325,13 +325,13 @@ func (l *Locer) Fix(node *ast.File) {
 			v := &ast.FuncDecl{
 				Name: &ast.Ident{Name: "init"},
 				Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{}}},
-				Body: &ast.BlockStmt{List: []ast.Stmt{cntnt}},
+				Body: &ast.BlockStmt{List: []ast.Stmt{loadModuleExpr}},
 			}
 			cursor.InsertAfter(v)
 		} else if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
 			if initExists && ret.Name.Name == "init" && needsImporting {
 				if !initHasLoad(ret, name) {
-					ret.Body.List = append(ret.Body.List, cntnt)
+					ret.Body.List = append(ret.Body.List, loadModuleExpr)
 					cursor.Replace(ret)
 				}
 			}
@@ -365,7 +365,7 @@ func (l *Locer) Fix(node *ast.File) {
 		logrus.Fatal(err)
 		return
 	}
-	if err := l.saveMap(newData, dataNames); err != nil {
+	if err := l.saveMap(newData, newDataNames); err != nil {
 		logrus.Fatal(err)
 		return
 	}
@@ -409,6 +409,7 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 				return err
 			}
 			defer newF.Close()
+			newF.WriteString(xml.Header)
 			enc := xml.NewEncoder(newF)
 			enc.Indent("", "    ")
 			if err := enc.Encode(xmlData); err != nil {

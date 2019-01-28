@@ -115,8 +115,7 @@ func (l *Locer) injectTran(name string, ret *ast.CallExpr, f *ast.SelectorExpr, 
 		dataCount[name]++
 		itemName = name + ":" + strconv.Itoa(dataCount[name])
 		noDupStrings[data] = itemName
-
-		dataNames[name] = append(dataNames[name], itemName)
+		newDataNames[name] = append(newDataNames[name], itemName)
 	}
 
 	args := []ast.Expr{
@@ -176,27 +175,56 @@ func (l *Locer) injectTran(name string, ret *ast.CallExpr, f *ast.SelectorExpr, 
 	}, needStrConvImport
 }
 
+func stringSlicesEqual(a, b []string) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // todo: simplify the newData structure
-func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataNames map[string][]string) error {
+func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, newDataNames map[string][]string) error {
 	for lang, filenameMap := range newData {
-		for name, data := range filenameMap {
-			if len(dataNames[name]) == 0 {
+		for modName, modData := range filenameMap {
+			names := loadOriginalModuleOrder(modName)
+			newNames := newDataNames[modName]
+			if len(names) < len(newNames) || !stringSlicesEqual(names[len(names)-len(newNames):], newNames) {
+				names = append(names, newNames...)
+			}
+			if len(names) == 0 {
 				continue
 			}
 
 			var xmlOutput Translation
-			for _, k := range dataNames[name] {
-				langData := data[k]
+			for _, k := range names {
+				langData, ok := modData[k]
+				if !ok {
+					langData = Value{
+						Id:      -1,
+						Name:    "",
+						Value:   "",
+						Comment: "Go ahead and ignore this; do not translate. This is an outdated string that needs to be left here because crowdin is derpy.",
+					}
+				}
+
 				xmlOutput.Rows = append(xmlOutput.Rows, langData)
 			}
-			xmlOutput.Counter = dataCount[name]
+			xmlOutput.Counter = dataCount[modName]
 
 			err := func() error {
 				// TODO: other filetypes than xml
-				enc := xml.NewEncoder(os.Stdout)
+				w := os.Stdout
 				if l.Apply {
 					// TODO: choose translationDir
-					xmlName := strings.TrimSuffix(path.Join(translationDir, lang, name), path.Ext(name)) + ".xml"
+					xmlName := strings.TrimSuffix(path.Join(translationDir, lang, modName), path.Ext(modName)) + ".xml"
 					err := os.MkdirAll(filepath.Dir(xmlName), 0755)
 					if err != nil {
 						return err
@@ -207,8 +235,10 @@ func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataName
 					}
 					defer f.Close()
 					// set encoding output
-					enc = xml.NewEncoder(f)
+					w = f
 				}
+				w.WriteString(xml.Header)
+				enc := xml.NewEncoder(w)
 				enc.Indent("", "    ")
 				if err := enc.Encode(xmlOutput); err != nil {
 					return err
@@ -221,4 +251,26 @@ func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, dataName
 		}
 	}
 	return nil
+}
+
+func loadOriginalModuleOrder(modName string) (out []string) {
+	f, err := os.Open(path.Join(translationDir, DefaultLang, strings.TrimSuffix(modName, path.Ext(modName))+".xml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		logrus.Fatal(err)
+		return
+	}
+	defer f.Close()
+	dec := xml.NewDecoder(f)
+	var xmlData Translation
+	err = dec.Decode(&xmlData)
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	for _, row := range xmlData.Rows {
+		out = append(out, row.Name)
+	}
+	return out
 }

@@ -115,6 +115,9 @@ func LoadLangModule(lang string, moduleName string) {
 		if _, ok := data[path.Base(lang)]; !ok {
 			data[path.Base(lang)] = make(map[string]Value)
 		}
+		if row.Name == "" { // ignore empties
+			continue
+		}
 		data[path.Base(lang)][row.Name] = row
 	}
 	count := xmlData.Counter
