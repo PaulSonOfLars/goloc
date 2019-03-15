@@ -415,6 +415,7 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 			if err := enc.Encode(xmlData); err != nil {
 				return err
 			}
+			newF.WriteString("\n")
 			return nil
 		})
 	if err != nil {

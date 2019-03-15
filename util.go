@@ -243,6 +243,7 @@ func (l *Locer) saveMap(newData map[string]map[string]map[string]Value, newDataN
 				if err := enc.Encode(xmlOutput); err != nil {
 					return err
 				}
+				w.WriteString("\n")
 				return nil
 			}()
 			if err != nil {
