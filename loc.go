@@ -98,12 +98,13 @@ func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 // TODO: remove dup code with the fix() method
 func (l *Locer) Inspect(node *ast.File) {
 	var counter int
-	var inMeth *ast.FuncDecl
+	//var inMeth *ast.FuncDecl
 	ast.Inspect(node, func(n ast.Node) bool {
-		if ret, ok := n.(*ast.FuncDecl); ok {
-			inMeth = ret
-
-		} else if ret, ok := n.(*ast.CallExpr); ok {
+		//if ret, ok := n.(*ast.FuncDecl); ok {
+		//	inMeth = ret
+		//
+		//} else
+		if ret, ok := n.(*ast.CallExpr); ok {
 			logrus.Debug("\n found a call ")
 			//printer.Fprint(os.Stdout, fset, ret)
 			if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
