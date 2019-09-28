@@ -61,14 +61,14 @@ func LoadAll(defLang string) {
 			}
 			relPath, err := filepath.Rel(base, fpath)
 			if err != nil {
-				logrus.WithError(err).Error("Could not get relative path of", fpath)
+				logrus.WithError(err).Errorf("Could not get relative path of %s", fpath)
 			}
 			Load(relPath)
 			//Load(info.Name())
 			return nil
 		})
 	if err != nil {
-		logrus.WithError(err).Error("Failed to walk translations directory")
+		logrus.WithError(err).Errorf("Failed to walk translations directory %s", base)
 	}
 }
 
@@ -84,14 +84,14 @@ func LoadLangAll(lang string) {
 			}
 			relPath, err := filepath.Rel(base, fpath)
 			if err != nil {
-				logrus.WithError(err).Error("Could not get relative path of", fpath)
+				logrus.WithError(err).Errorf("Could not get relative path of %s", fpath)
 			}
 			LoadLangModule(lang, relPath)
 			//Load(info.Name())
 			return nil
 		})
 	if err != nil {
-		logrus.WithError(err).Error("Failed to walk translations directory")
+		logrus.WithError(err).Errorf("Failed to walk translations directory %s", base)
 	}
 }
 
@@ -101,7 +101,7 @@ func LoadLangModule(lang string, moduleName string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		logrus.WithError(err).Error("Failed to open file at", moduleName)
+		logrus.WithError(err).Errorf("Failed to open file at %s", moduleName)
 		return
 	}
 	defer f.Close()
@@ -109,7 +109,7 @@ func LoadLangModule(lang string, moduleName string) {
 	var xmlData Translation
 	err = dec.Decode(&xmlData)
 	if err != nil {
-		logrus.WithError(err).Error("Failed to decode data for", moduleName)
+		logrus.WithError(err).Errorf("Failed to decode data for %s", moduleName)
 		return
 	}
 	for _, row := range xmlData.Rows {
@@ -137,10 +137,15 @@ func Load(moduleToLoad string) {
 			return
 		}
 
-		logrus.WithError(err).Error("failed to load", moduleToLoad)
+		logrus.WithError(err).Errorf("failed to load %s", moduleToLoad)
 		return
 	}
 	for _, x := range files {
+		if !x.IsDir() || strings.HasPrefix(x.Name(), ".") {
+			// if not a directory, or is hidden, skip
+			continue
+		}
+
 		LoadLangModule(x.Name(), moduleToLoad)
 	}
 }
