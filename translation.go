@@ -3,13 +3,14 @@ package goloc
 import (
 	"encoding/xml"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 var data = make(map[string]map[string]Value)
@@ -60,14 +61,14 @@ func LoadAll(defLang string) {
 			}
 			relPath, err := filepath.Rel(base, fpath)
 			if err != nil {
-				logrus.Fatal(err)
+				logrus.WithError(err).Error("Could not get relative path of", fpath)
 			}
 			Load(relPath)
 			//Load(info.Name())
 			return nil
 		})
 	if err != nil {
-		logrus.Fatal(err)
+		logrus.WithError(err).Error("Failed to walk translations directory")
 	}
 }
 
@@ -83,14 +84,14 @@ func LoadLangAll(lang string) {
 			}
 			relPath, err := filepath.Rel(base, fpath)
 			if err != nil {
-				logrus.Fatal(err)
+				logrus.WithError(err).Error("Could not get relative path of", fpath)
 			}
 			LoadLangModule(lang, relPath)
 			//Load(info.Name())
 			return nil
 		})
 	if err != nil {
-		logrus.Fatal(err)
+		logrus.WithError(err).Error("Failed to walk translations directory")
 	}
 }
 
@@ -100,7 +101,7 @@ func LoadLangModule(lang string, moduleName string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		logrus.Fatal(err)
+		logrus.WithError(err).Error("Failed to open file at", moduleName)
 		return
 	}
 	defer f.Close()
@@ -108,7 +109,7 @@ func LoadLangModule(lang string, moduleName string) {
 	var xmlData Translation
 	err = dec.Decode(&xmlData)
 	if err != nil {
-		logrus.Fatal(err)
+		logrus.WithError(err).Error("Failed to decode data for", moduleName)
 		return
 	}
 	for _, row := range xmlData.Rows {
@@ -136,7 +137,7 @@ func Load(moduleToLoad string) {
 			return
 		}
 
-		logrus.Fatal(err)
+		logrus.WithError(err).Error("failed to load", moduleToLoad)
 		return
 	}
 	for _, x := range files {

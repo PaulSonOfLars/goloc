@@ -2,7 +2,6 @@ package goloc
 
 import (
 	"encoding/xml"
-	"github.com/sirupsen/logrus"
 	"go/ast"
 	"go/token"
 	"os"
@@ -10,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []ast.Expr, needStrconv bool) {
