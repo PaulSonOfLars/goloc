@@ -46,7 +46,7 @@ type Locer struct {
 
 func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 	if len(args) == 0 {
-		Logger.Errorln("No input provided.")
+		Logger.Error("No input provided.")
 		return nil
 	}
 	for _, arg := range args {
@@ -58,7 +58,7 @@ func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 		switch mode := fi.Mode(); {
 		case mode.IsDir():
 			// do directory stuff
-			Logger.Debugln("directory input")
+			Logger.Debug("directory input")
 			nodes, err := parser.ParseDir(l.Fset, arg, nil, parser.ParseComments)
 			if err != nil {
 				return err
@@ -75,7 +75,7 @@ func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 			}
 		case mode.IsRegular():
 			// do file stuff
-			Logger.Debugln("file input")
+			Logger.Debug("file input")
 			node, err := parser.ParseFile(l.Fset, arg, nil, parser.ParseComments)
 			if err != nil {
 				return err
@@ -136,7 +136,7 @@ func (l *Locer) Inspect(node *ast.File) {
 		}
 		return true
 	})
-	Logger.Debugln()
+	Logger.Debug()
 }
 
 var newData map[string]map[string]map[string]Value // locale:(filename:(trigger:Value))
@@ -299,7 +299,7 @@ func (l *Locer) Fix(node *ast.File) {
 					}
 				}
 
-				Logger.Debugln("add lang to " + name)
+				Logger.Debug("add lang to " + name)
 				ret.Body.List = append([]ast.Stmt{
 					&ast.AssignStmt{
 						Lhs: []ast.Expr{&ast.Ident{Name: "lang"}},
