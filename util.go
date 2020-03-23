@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/sirupsen/logrus"
 )
 
 func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []ast.Expr, needStrconv bool) {
@@ -59,10 +57,10 @@ func parseFmtString(rdata []rune, ret *ast.CallExpr) (newData []rune, mapData []
 							Args: []ast.Expr{ret.Args[index]},
 						},
 					})
-				//case 'p': // pointer (wtaf)
-				//strconv
+				// case 'p': // pointer (wtaf)
+				// strconv
 			default:
-				logrus.Fatalf("no way to handle '%s' formatting yet", string(x))
+				Logger.Fatalf("no way to handle '%s' formatting yet", string(x))
 			}
 			newData = append(newData, []rune("{"+strconv.Itoa(index)+"}")...)
 			index++
@@ -106,7 +104,7 @@ func contains(ss []string, s string) bool {
 func (l *Locer) injectTran(name string, ret *ast.CallExpr, f *ast.SelectorExpr, v *ast.BasicLit) (*ast.CallExpr, bool) {
 	data, err := strconv.Unquote(v.Value)
 	if err != nil {
-		logrus.Fatal(err)
+		Logger.Fatal(err)
 		return nil, false
 	}
 	needStrConvImport := false
@@ -261,7 +259,7 @@ func loadOriginalModuleOrder(modName string) (out []string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		logrus.Fatal(err)
+		Logger.Fatal(err)
 		return
 	}
 	defer f.Close()
@@ -269,7 +267,7 @@ func loadOriginalModuleOrder(modName string) (out []string) {
 	var xmlData Translation
 	err = dec.Decode(&xmlData)
 	if err != nil {
-		logrus.Fatal(err)
+		Logger.Fatal(err)
 	}
 	for _, row := range xmlData.Rows {
 		out = append(out, row.Name)

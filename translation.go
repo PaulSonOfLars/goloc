@@ -10,13 +10,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sirupsen/logrus"
+	"go.uber.org/zap"
 )
 
 var data = make(map[string]map[string]Value)
 var dataCount = make(map[string]int)
 var languages []string
 var DefaultLang = "en-GB"
+var Logger *zap.SugaredLogger
 
 func Trnl(lang string, trnlVal string) string {
 	v, ok := data[lang][trnlVal]
@@ -40,12 +41,12 @@ func Trnlf(lang string, trnlVal string, dataMap map[string]string) string {
 }
 
 func Add(text string) string {
-	logrus.Warn("unloaded translation string for Add()")
+	Logger.Warn("unloaded translation string for Add()")
 	return text
 }
 
 func Addf(text string, format ...interface{}) string {
-	logrus.Warn("unloaded translation string for Addf()")
+	Logger.Warn("unloaded translation string for Addf()")
 	return fmt.Sprintf(text, format...)
 }
 
@@ -61,14 +62,13 @@ func LoadAll(defLang string) {
 			}
 			relPath, err := filepath.Rel(base, fpath)
 			if err != nil {
-				logrus.WithError(err).Errorf("Could not get relative path of %s", fpath)
+				Logger.With(zap.Error(err)).Errorf("Could not get relative path of %s", fpath)
 			}
 			Load(relPath)
-			//Load(info.Name())
 			return nil
 		})
 	if err != nil {
-		logrus.WithError(err).Errorf("Failed to walk translations directory %s", base)
+		Logger.With(zap.Error(err)).Errorf("Failed to walk translations directory %s", base)
 	}
 }
 
@@ -84,14 +84,14 @@ func LoadLangAll(lang string) {
 			}
 			relPath, err := filepath.Rel(base, fpath)
 			if err != nil {
-				logrus.WithError(err).Errorf("Could not get relative path of %s", fpath)
+				Logger.With(zap.Error(err)).Errorf("Could not get relative path of %s", fpath)
 			}
 			LoadLangModule(lang, relPath)
-			//Load(info.Name())
+			// Load(info.Name())
 			return nil
 		})
 	if err != nil {
-		logrus.WithError(err).Errorf("Failed to walk translations directory %s", base)
+		Logger.With(zap.Error(err)).Errorf("Failed to walk translations directory %s", base)
 	}
 }
 
@@ -101,7 +101,7 @@ func LoadLangModule(lang string, moduleName string) {
 		if os.IsNotExist(err) {
 			return
 		}
-		logrus.WithError(err).Errorf("Failed to open file at %s", moduleName)
+		Logger.With(zap.Error(err)).Errorf("Failed to open file at %s", moduleName)
 		return
 	}
 	defer f.Close()
@@ -109,7 +109,7 @@ func LoadLangModule(lang string, moduleName string) {
 	var xmlData Translation
 	err = dec.Decode(&xmlData)
 	if err != nil {
-		logrus.WithError(err).Errorf("Failed to decode data for %s", moduleName)
+		Logger.With(zap.Error(err)).Errorf("Failed to decode data for %s", moduleName)
 		return
 	}
 	for _, row := range xmlData.Rows {
@@ -137,7 +137,7 @@ func Load(moduleToLoad string) {
 			return
 		}
 
-		logrus.WithError(err).Errorf("failed to load %s", moduleToLoad)
+		Logger.With(zap.Error(err)).Errorf("failed to load %s", moduleToLoad)
 		return
 	}
 	for _, x := range files {

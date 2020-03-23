@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
-	"github.com/PaulSonOfLars/goloc"
-	"github.com/sirupsen/logrus"
-	"github.com/spf13/cobra"
 	"go/token"
-	"golang.org/x/text/language"
 	"os"
+
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"golang.org/x/text/language"
+
+	"github.com/PaulSonOfLars/goloc"
 )
 
 func main() {
@@ -19,22 +22,34 @@ func main() {
 	var lang string
 	verbose := false
 
+	dyn := zap.NewAtomicLevel() // defaults to Info
+	dyn.SetLevel(zap.InfoLevel)
+
+	cfg := zap.NewProductionEncoderConfig()
+	cfg.EncodeLevel = zapcore.CapitalLevelEncoder
+	cfg.EncodeTime = zapcore.RFC3339TimeEncoder
+
+	logger := zap.New(zapcore.NewCore(zapcore.NewConsoleEncoder(cfg), os.Stdout, dyn))
+	defer logger.Sync() // flushes buffer, if any
+	s := logger.Sugar()
+
 	rootCmd := cobra.Command{
 		Use:   "goloc",
 		Short: "Extract strings for i18n of your go tools",
 		Long:  "Simple i18n tool to allow for extracting all your i18n strings into manageable files, and load them back after.",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			if verbose {
-				logrus.SetLevel(logrus.DebugLevel)
+				dyn.SetLevel(zap.DebugLevel)
 			} else {
-				logrus.SetLevel(logrus.InfoLevel)
+				dyn.SetLevel(zap.InfoLevel)
 			}
 			l.DefaultLang = language.Make(lang)
 			if l.DefaultLang == language.Und {
-				logrus.Fatalf("invalid language selected: '%s' does not match any known language codes")
+				s.Fatalf("invalid language selected: '%s' does not match any known language codes")
 			}
 		},
 	}
+
 	rootCmd.PersistentFlags().StringSliceVar(&l.Funcs, "funcs", nil, "all funcs to extraxt")
 	rootCmd.PersistentFlags().StringSliceVar(&l.Fmtfuncs, "fmtfuncs", nil, "all format funcs to extract")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "add extra verbosity")
@@ -46,7 +61,7 @@ func main() {
 		Short: "Run an analyse all appropriate strings in specified files",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := l.Handle(args, l.Inspect); err != nil {
-				logrus.Fatal(err)
+				s.Fatal(err)
 			}
 		},
 	})
@@ -56,7 +71,7 @@ func main() {
 		Short: "extract all strings",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := l.Handle(args, l.Fix); err != nil {
-				logrus.Fatal(err)
+				s.Fatal(err)
 			}
 		},
 	})
@@ -67,12 +82,12 @@ func main() {
 		Short: "create new language from default",
 		Run: func(cmd *cobra.Command, args []string) {
 			if createLang == "" {
-				logrus.Error("No language to create specified")
+				s.Error("No language to create specified")
 				return
 			}
 			lang := language.Make(createLang)
 			if lang == language.Und {
-				logrus.Fatalf("invalid language selected: '%s' does not match any known language codes")
+				s.Fatalf("invalid language selected: '%s' does not match any known language codes")
 			}
 
 			l.Create(args, lang)
@@ -94,13 +109,13 @@ func main() {
 			} else {
 				lang := language.Make(checkLang)
 				if lang == language.Und {
-					logrus.Fatalf("invalid language selected: '%s' does not match any known language codes")
+					s.Fatalf("invalid language selected: '%s' does not match any known language codes")
 				}
 				// load default, and load lang, check
 				err = l.Check(lang)
 			}
 			if err != nil {
-				logrus.Fatal(err)
+				s.Fatal(err)
 			}
 
 		},

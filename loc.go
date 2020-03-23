@@ -4,19 +4,19 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"golang.org/x/text/language"
-	"golang.org/x/tools/go/ast/astutil"
 	"os"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/language"
+	"golang.org/x/tools/go/ast/astutil"
 )
 
 const translationDir = "trans"
@@ -46,7 +46,7 @@ type Locer struct {
 
 func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 	if len(args) == 0 {
-		logrus.Errorln("No input provided.")
+		Logger.Errorln("No input provided.")
 		return nil
 	}
 	for _, arg := range args {
@@ -58,7 +58,7 @@ func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 		switch mode := fi.Mode(); {
 		case mode.IsDir():
 			// do directory stuff
-			logrus.Debugln("directory input")
+			Logger.Debugln("directory input")
 			nodes, err := parser.ParseDir(l.Fset, arg, nil, parser.ParseComments)
 			if err != nil {
 				return err
@@ -75,7 +75,7 @@ func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 			}
 		case mode.IsRegular():
 			// do file stuff
-			logrus.Debugln("file input")
+			Logger.Debugln("file input")
 			node, err := parser.ParseFile(l.Fset, arg, nil, parser.ParseComments)
 			if err != nil {
 				return err
@@ -88,9 +88,9 @@ func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 			hdnl(node)
 		}
 	}
-	logrus.Info("the following have been checked:")
+	Logger.Info("the following have been checked:")
 	for k := range l.Checked {
-		logrus.Info("  " + k)
+		Logger.Info("  " + k)
 	}
 	return nil
 }
@@ -98,24 +98,24 @@ func (l *Locer) Handle(args []string, hdnl func(*ast.File)) error {
 // TODO: remove dup code with the fix() method
 func (l *Locer) Inspect(node *ast.File) {
 	var counter int
-	//var inMeth *ast.FuncDecl
+	// var inMeth *ast.FuncDecl
 	ast.Inspect(node, func(n ast.Node) bool {
-		//if ret, ok := n.(*ast.FuncDecl); ok {
+		// if ret, ok := n.(*ast.FuncDecl); ok {
 		//	inMeth = ret
 		//
-		//} else
+		// } else
 		if ret, ok := n.(*ast.CallExpr); ok {
-			logrus.Debug("\n found a call ")
-			//printer.Fprint(os.Stdout, fset, ret)
+			Logger.Debug("\n found a call ")
+			// printer.Fprint(os.Stdout, fset, ret)
 			if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
-				logrus.Debug("\n  found call named " + f.Sel.Name)
+				Logger.Debug("\n  found call named " + f.Sel.Name)
 				if contains(append(l.Funcs, l.Fmtfuncs...), f.Sel.Name) && len(ret.Args) > 0 {
 					ex := ret.Args[0]
 
 					if v, ok := ex.(*ast.BasicLit); ok && v.Kind == token.STRING {
 						buf := bytes.NewBuffer([]byte{})
 						printer.Fprint(buf, l.Fset, v)
-						logrus.Debugf("\n   found a string:\n%s", buf.String())
+						Logger.Debugf("\n   found a string:\n%s", buf.String())
 
 						counter++
 						name := l.Fset.File(v.Pos()).Name() + ":" + strconv.Itoa(counter)
@@ -123,12 +123,12 @@ func (l *Locer) Inspect(node *ast.File) {
 
 					} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
 						// note: plz reformat not to use adds
-						logrus.Debug("\n   found a binary expr instead of str; fix your code")
-						//v, ok := v2.X.(*ast.BasicLit)
-						//v, ok := v2.Y.(*ast.BasicLit)
+						Logger.Debug("\n   found a binary expr instead of str; fix your code")
+						// v, ok := v2.X.(*ast.BasicLit)
+						// v, ok := v2.Y.(*ast.BasicLit)
 
 					} else {
-						logrus.Debugf("\n   found something else: %T", ex)
+						Logger.Debugf("\n   found something else: %T", ex)
 
 					}
 				}
@@ -136,7 +136,7 @@ func (l *Locer) Inspect(node *ast.File) {
 		}
 		return true
 	})
-	logrus.Debugln()
+	Logger.Debugln()
 }
 
 var newData map[string]map[string]map[string]Value // locale:(filename:(trigger:Value))
@@ -164,7 +164,7 @@ func (l *Locer) Fix(node *ast.File) {
 	// todo: investigate unnecessary "lang := " loads
 
 	Load(name) // load current values
-	logrus.Debug("module count at", dataCount[name])
+	Logger.Debug("module count at", dataCount[name])
 	newData = make(map[string]map[string]map[string]Value) // locale:(filename:(trigger:Value))
 	newDataNames = make(map[string][]string)               // filename:[]newtriggers
 	noDupStrings = make(map[string]string)                 // map of currently loaded strings, to avoid duplicates and reduce translation efforts
@@ -197,7 +197,7 @@ func (l *Locer) Fix(node *ast.File) {
 			} else if ret, ok := n.(*ast.CallExpr); ok {
 				// determine if method is one of the validated ones
 				if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
-					logrus.Debug("\n  found random call named " + f.Sel.Name)
+					Logger.Debug("\n  found random call named " + f.Sel.Name)
 
 					// if valid and has args, check first arg (which should be a string)
 					if contains(append(l.Funcs, l.Fmtfuncs...), f.Sel.Name) && len(ret.Args) > 0 {
@@ -206,7 +206,7 @@ func (l *Locer) Fix(node *ast.File) {
 						if v, ok := ex.(*ast.BasicLit); ok && v.Kind == token.STRING {
 							buf := bytes.NewBuffer([]byte{})
 							printer.Fprint(buf, l.Fset, v)
-							logrus.Debugf("\n   found a string in funcname %s:\n%s", f.Sel.Name, buf.String())
+							Logger.Debugf("\n   found a string in funcname %s:\n%s", f.Sel.Name, buf.String())
 
 							args, needStrconvImportNew := l.injectTran(name, ret, f, v)
 
@@ -220,10 +220,10 @@ func (l *Locer) Fix(node *ast.File) {
 							// if not a string, but a binop:
 						} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
 							// note: plz reformat not to use adds
-							logrus.Debug("\n   found a binary expr instead of str; fix your code")
+							Logger.Debug("\n   found a binary expr instead of str; fix your code")
 
 						} else {
-							logrus.Debugf("\n   found something else: %T", ex)
+							Logger.Debugf("\n   found something else: %T", ex)
 						}
 					} else if prev, ok := f.X.(*ast.Ident); ok && prev.Name == "goloc" {
 						// has already been translated, check if it isn't duplicated.
@@ -231,7 +231,7 @@ func (l *Locer) Fix(node *ast.File) {
 							if arg, ok := ret.Args[1].(*ast.BasicLit); ok && arg.Kind == token.STRING { // possible OOB
 								val, err := strconv.Unquote(arg.Value)
 								if err != nil {
-									logrus.Fatal(err)
+									Logger.Fatal(err)
 									return true
 								}
 								itemName, ok := noDupStrings[data[l.DefaultLang.String()][val].Value]
@@ -264,7 +264,7 @@ func (l *Locer) Fix(node *ast.File) {
 							if v, ok := ret.Args[0].(*ast.BasicLit); ok {
 								buf := bytes.NewBuffer([]byte{})
 								printer.Fprint(buf, l.Fset, v)
-								logrus.Debugf("\n   found a string to add via Add(f):\n%s", buf.String())
+								Logger.Debugf("\n   found a string to add via Add(f):\n%s", buf.String())
 
 								ret, needStrconvImport = l.injectTran(name, ret, f, v)
 
@@ -299,7 +299,7 @@ func (l *Locer) Fix(node *ast.File) {
 					}
 				}
 
-				logrus.Debugln("add lang to " + name)
+				Logger.Debugln("add lang to " + name)
 				ret.Body.List = append([]ast.Stmt{
 					&ast.AssignStmt{
 						Lhs: []ast.Expr{&ast.Ident{Name: "lang"}},
@@ -354,7 +354,7 @@ func (l *Locer) Fix(node *ast.File) {
 	if l.Apply {
 		f, err := os.Create(name)
 		if err != nil {
-			logrus.Fatal(err)
+			Logger.Fatal(err)
 			return
 		}
 		defer f.Close()
@@ -363,11 +363,11 @@ func (l *Locer) Fix(node *ast.File) {
 
 	}
 	if err := format.Node(out, l.Fset, node); err != nil {
-		logrus.Fatal(err)
+		Logger.Fatal(err)
 		return
 	}
 	if err := l.saveMap(newData, newDataNames); err != nil {
-		logrus.Fatal(err)
+		Logger.Fatal(err)
 		return
 	}
 }
@@ -420,7 +420,7 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 			return nil
 		})
 	if err != nil {
-		logrus.Fatal(err)
+		Logger.Fatal(err)
 	}
 }
 
