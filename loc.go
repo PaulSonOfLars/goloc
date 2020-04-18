@@ -185,7 +185,8 @@ func (l *Locer) Fix(node *ast.File) {
 
 	// should return to node?
 	astutil.Apply(node,
-		/*pre*/ func(cursor *astutil.Cursor) bool {
+		/*pre*/
+		func(cursor *astutil.Cursor) bool {
 			n := cursor.Node()
 			// get info on init call.
 			if ret, ok := n.(*ast.FuncDecl); ok {
@@ -210,6 +211,8 @@ func (l *Locer) Fix(node *ast.File) {
 
 							args, needStrconvImportNew := l.injectTran(name, ret, f, v)
 
+							f.Sel.Name = l.getUnFmtFunc(f.Sel.Name)
+							ret.Fun = f
 							ret.Args = []ast.Expr{args}
 							cursor.Replace(ret)
 							needStrconvImport = needStrconvImportNew
@@ -307,7 +310,7 @@ func (l *Locer) Fix(node *ast.File) {
 						Rhs: []ast.Expr{
 							&ast.CallExpr{
 								Fun:  &ast.Ident{Name: "getLang"},       // todo: parameterise
-								Args: []ast.Expr{&ast.Ident{Name: "u"}}, // todo figure this bit out
+								Args: []ast.Expr{&ast.Ident{Name: "u"}}, // todo: figure this bit out
 							},
 						},
 					},
@@ -457,4 +460,19 @@ func (l *Locer) check(lang language.Tag) error {
 	// TODO: check all inputs have start/end whitespace
 	// TODO: investigate changing decoder
 	return nil
+}
+
+func (l *Locer) getUnFmtFunc(name string) string {
+	if !strings.HasSuffix(name, "f") {
+		// not a formatting function; all ok.
+		return name
+	}
+	for _, f := range l.Funcs {
+		if f+"f" == name {
+			// found simple func; return.
+			return f
+		}
+	}
+	// no result found; return current.
+	return name
 }

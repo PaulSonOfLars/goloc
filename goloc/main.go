@@ -19,6 +19,7 @@ func main() {
 		Checked:     make(map[string]struct{}),
 		Fset:        token.NewFileSet(),
 	}
+
 	var lang string
 	verbose := false
 
@@ -32,6 +33,7 @@ func main() {
 	logger := zap.New(zapcore.NewCore(zapcore.NewConsoleEncoder(cfg), os.Stdout, dyn))
 	defer logger.Sync() // flushes buffer, if any
 	s := logger.Sugar()
+	goloc.Logger = s
 
 	rootCmd := cobra.Command{
 		Use:   "goloc",
