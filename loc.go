@@ -178,8 +178,8 @@ func (l *Locer) Fix(node *ast.File) {
 		newData[k][name] = make(map[string]Value)
 	}
 
-	var needsSetting bool      // method needs the lang := arg
-	var needsImporting bool    // goloc needs importing
+	var needsLangSetting bool  // method needs the lang := arg
+	var needGolocImport bool   // goloc needs importing
 	var needStrconvImport bool // need to import strconv
 	var initExists bool        // does init method exist
 
@@ -195,43 +195,43 @@ func (l *Locer) Fix(node *ast.File) {
 				}
 
 				// Check method calls
-			} else if ret, ok := n.(*ast.CallExpr); ok {
+			} else if callExpr, ok := n.(*ast.CallExpr); ok {
 				// determine if method is one of the validated ones
-				if f, ok := ret.Fun.(*ast.SelectorExpr); ok {
-					Logger.Debug("\n  found random call named " + f.Sel.Name)
+				if funcCall, ok := callExpr.Fun.(*ast.SelectorExpr); ok {
+					Logger.Debug("\n  found random call named " + funcCall.Sel.Name)
 
 					// if valid and has args, check first arg (which should be a string)
-					if contains(append(l.Funcs, l.Fmtfuncs...), f.Sel.Name) && len(ret.Args) > 0 {
-						ex := ret.Args[0]
+					if contains(append(l.Funcs, l.Fmtfuncs...), funcCall.Sel.Name) && len(callExpr.Args) > 0 {
+						firstArg := callExpr.Args[0]
 
-						if v, ok := ex.(*ast.BasicLit); ok && v.Kind == token.STRING {
+						if litItem, ok := firstArg.(*ast.BasicLit); ok && litItem.Kind == token.STRING {
 							buf := bytes.NewBuffer([]byte{})
-							printer.Fprint(buf, l.Fset, v)
-							Logger.Debugf("\n   found a string in funcname %s:\n%s", f.Sel.Name, buf.String())
+							printer.Fprint(buf, l.Fset, litItem)
+							Logger.Debugf("\n   found a string in funcname %s:\n%s", funcCall.Sel.Name, buf.String())
 
-							args, needStrconvImportNew := l.injectTran(name, ret, f, v)
+							args, needStrconvImportNew := l.injectTran(name, callExpr, funcCall, litItem)
 
-							f.Sel.Name = l.getUnFmtFunc(f.Sel.Name)
-							ret.Fun = f
-							ret.Args = []ast.Expr{args}
-							cursor.Replace(ret)
+							funcCall.Sel.Name = l.getUnFmtFunc(funcCall.Sel.Name)
+							callExpr.Fun = funcCall
+							callExpr.Args = []ast.Expr{args}
+							cursor.Replace(callExpr)
 							needStrconvImport = needStrconvImportNew
-							needsImporting = true
-							needsSetting = true
+							needGolocImport = true
+							needsLangSetting = true
 							return false
 
 							// if not a string, but a binop:
-						} else if v2, ok := ex.(*ast.BinaryExpr); ok && v2.Op == token.ADD {
+						} else if binExpr, ok := firstArg.(*ast.BinaryExpr); ok && binExpr.Op == token.ADD {
 							// note: plz reformat not to use adds
 							Logger.Debug("\n   found a binary expr instead of str; fix your code")
 
 						} else {
-							Logger.Debugf("\n   found something else: %T", ex)
+							Logger.Debugf("\n   found something else: %T", firstArg)
 						}
-					} else if prev, ok := f.X.(*ast.Ident); ok && prev.Name == "goloc" {
+					} else if caller, ok := funcCall.X.(*ast.Ident); ok && caller.Name == "goloc" {
 						// has already been translated, check if it isn't duplicated.
-						if f.Sel.Name == "Trnl" || f.Sel.Name == "Trnlf" {
-							if arg, ok := ret.Args[1].(*ast.BasicLit); ok && arg.Kind == token.STRING { // possible OOB
+						if funcCall.Sel.Name == "Trnl" || funcCall.Sel.Name == "Trnlf" {
+							if arg, ok := callExpr.Args[1].(*ast.BasicLit); ok && arg.Kind == token.STRING { // possible OOB
 								val, err := strconv.Unquote(arg.Value)
 								if err != nil {
 									Logger.Fatal(err)
@@ -263,17 +263,17 @@ func (l *Locer) Fix(node *ast.File) {
 								cursor.Replace(n)
 								return false
 							}
-						} else if f.Sel.Name == "Add" || f.Sel.Name == "Addf" {
-							if v, ok := ret.Args[0].(*ast.BasicLit); ok {
+						} else if funcCall.Sel.Name == "Add" || funcCall.Sel.Name == "Addf" {
+							if v, ok := callExpr.Args[0].(*ast.BasicLit); ok {
 								buf := bytes.NewBuffer([]byte{})
 								printer.Fprint(buf, l.Fset, v)
 								Logger.Debugf("\n   found a string to add via Add(f):\n%s", buf.String())
 
-								ret, needStrconvImport = l.injectTran(name, ret, f, v)
+								callExpr, needStrconvImport = l.injectTran(name, callExpr, funcCall, v)
 
-								cursor.Replace(ret)
-								needsImporting = true
-								needsSetting = true
+								cursor.Replace(callExpr)
+								needGolocImport = true
+								needsLangSetting = true
 								return false
 							}
 						}
@@ -285,25 +285,25 @@ func (l *Locer) Fix(node *ast.File) {
 		},
 		/*post*/
 		func(cursor *astutil.Cursor) bool {
-			if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
-				if initExists && ret.Name.Name == "init" && needsImporting {
-					if !initHasLoad(ret, name) {
-						ret.Body.List = append(ret.Body.List, loadModuleExpr)
-						cursor.Replace(ret)
+			if FuncDecl, ok := cursor.Node().(*ast.FuncDecl); ok && needsLangSetting {
+				if initExists && FuncDecl.Name.Name == "init" && needGolocImport {
+					if !initHasLoad(FuncDecl, name) {
+						FuncDecl.Body.List = append(FuncDecl.Body.List, loadModuleExpr)
+						cursor.Replace(FuncDecl)
 					}
 				}
 
-				if len(ret.Body.List) == 0 {
+				if len(FuncDecl.Body.List) == 0 {
 					return true // do nothing
-				} else if ass, ok := ret.Body.List[0].(*ast.AssignStmt); ok {
+				} else if ass, ok := FuncDecl.Body.List[0].(*ast.AssignStmt); ok {
 					// todo: stronger check
 					if i, ok := ass.Lhs[0].(*ast.Ident); ok && i.Name == "lang" { // check/update generator
 						return true // continue and ignore
 					}
 				}
 
-				Logger.Debug("add lang to " + name)
-				ret.Body.List = append([]ast.Stmt{
+				Logger.Debug("adding lang to " + name)
+				FuncDecl.Body.List = append([]ast.Stmt{
 					&ast.AssignStmt{
 						Lhs: []ast.Expr{&ast.Ident{Name: "lang"}},
 						Tok: token.DEFINE,
@@ -314,9 +314,9 @@ func (l *Locer) Fix(node *ast.File) {
 							},
 						},
 					},
-				}, ret.Body.List...)
-				cursor.Replace(ret)
-				needsSetting = false
+				}, FuncDecl.Body.List...)
+				cursor.Replace(FuncDecl)
+				needsLangSetting = false
 			}
 			return true
 		},
@@ -325,15 +325,15 @@ func (l *Locer) Fix(node *ast.File) {
 	astutil.Apply(node, func(cursor *astutil.Cursor) bool {
 		return true
 	}, func(cursor *astutil.Cursor) bool {
-		if d, ok := cursor.Node().(*ast.GenDecl); ok && d.Tok == token.IMPORT && !initExists && needsImporting {
+		if d, ok := cursor.Node().(*ast.GenDecl); ok && d.Tok == token.IMPORT && !initExists && needGolocImport {
 			v := &ast.FuncDecl{
 				Name: &ast.Ident{Name: "init"},
 				Type: &ast.FuncType{Params: &ast.FieldList{List: []*ast.Field{}}},
 				Body: &ast.BlockStmt{List: []ast.Stmt{loadModuleExpr}},
 			}
 			cursor.InsertAfter(v)
-		} else if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsSetting {
-			if initExists && ret.Name.Name == "init" && needsImporting {
+		} else if ret, ok := cursor.Node().(*ast.FuncDecl); ok && needsLangSetting {
+			if initExists && ret.Name.Name == "init" && needGolocImport {
 				if !initHasLoad(ret, name) {
 					ret.Body.List = append(ret.Body.List, loadModuleExpr)
 					cursor.Replace(ret)
@@ -343,7 +343,7 @@ func (l *Locer) Fix(node *ast.File) {
 		return true
 	})
 
-	if needsImporting {
+	if needGolocImport {
 		astutil.AddImport(l.Fset, node, "github.com/PaulSonOfLars/goloc")
 		ast.SortImports(l.Fset, node)
 	}
