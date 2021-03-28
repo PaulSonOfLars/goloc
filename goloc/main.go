@@ -15,7 +15,7 @@ import (
 
 func main() {
 	l := &goloc.Locer{
-		DefaultLang: language.BritishEnglish,
+		DefaultLang: "en-GB",
 		Checked:     make(map[string]struct{}),
 		Fset:        token.NewFileSet(),
 	}
@@ -45,10 +45,7 @@ func main() {
 			} else {
 				dyn.SetLevel(zap.InfoLevel)
 			}
-			l.DefaultLang = language.Make(lang)
-			if l.DefaultLang == language.Und {
-				s.Fatalf("invalid language selected: '%s' does not match any known language codes")
-			}
+			l.DefaultLang = lang
 		},
 	}
 
@@ -109,17 +106,12 @@ func main() {
 				// load all, iterate over language code
 				// check all
 			} else {
-				lang := language.Make(checkLang)
-				if lang == language.Und {
-					s.Fatalf("invalid language selected: '%s' does not match any known language codes")
-				}
 				// load default, and load lang, check
-				err = l.Check(lang)
+				err = l.Check(checkLang)
 			}
 			if err != nil {
 				s.Fatal(err)
 			}
-
 		},
 	}
 	checkCmd.Flags().StringVarP(&checkLang, "check", "c", "all", "select which language to check")

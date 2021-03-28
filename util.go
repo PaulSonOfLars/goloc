@@ -157,7 +157,7 @@ func (l *Locer) injectTran(name string, ret *ast.CallExpr, f *ast.SelectorExpr, 
 			}
 		}
 		// set data only for default value
-		newData[l.DefaultLang.String()][name][itemName] = Value{
+		newData[l.DefaultLang][name][itemName] = Value{
 			Id:      dataCount[name],
 			Name:    itemName,
 			Value:   data,

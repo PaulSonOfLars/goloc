@@ -3,6 +3,7 @@ package goloc
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -12,9 +13,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/BlackEspresso/htmlcheck"
 	"golang.org/x/text/language"
 	"golang.org/x/tools/go/ast/astutil"
 )
@@ -35,7 +38,7 @@ type Value struct {
 }
 
 type Locer struct {
-	DefaultLang language.Tag
+	DefaultLang string
 	Funcs       []string
 	Fmtfuncs    []string
 	Checked     map[string]struct{}
@@ -170,8 +173,8 @@ func (l *Locer) Fix(node *ast.File) {
 	noDupStrings = make(map[string]string)                 // map of currently loaded strings, to avoid duplicates and reduce translation efforts
 
 	// make sure default language is loaded
-	newData[l.DefaultLang.String()] = make(map[string]map[string]Value)
-	newData[l.DefaultLang.String()][name] = make(map[string]Value)
+	newData[l.DefaultLang] = make(map[string]map[string]Value)
+	newData[l.DefaultLang][name] = make(map[string]Value)
 	// initialise set for all other languages
 	for k := range data { // initialise all languages
 		newData[k] = make(map[string]map[string]Value)
@@ -237,16 +240,16 @@ func (l *Locer) Fix(node *ast.File) {
 									Logger.Fatal(err)
 									return true
 								}
-								itemName, ok := noDupStrings[data[l.DefaultLang.String()][val].Value]
+								itemName, ok := noDupStrings[data[l.DefaultLang][val].Value]
 								if ok {
 									val = itemName
 								} else {
-									noDupStrings[data[l.DefaultLang.String()][val].Value] = val
+									noDupStrings[data[l.DefaultLang][val].Value] = val
 									// add curr data to the new data (this will remove unused vals)
 									for lang := range newData {
 										currVal, ok := data[lang][val]
 										if !ok {
-											defLangVal := data[l.DefaultLang.String()][val]
+											defLangVal := data[l.DefaultLang][val]
 											currVal = Value{
 												Id:      defLangVal.Id,
 												Name:    defLangVal.Name,
@@ -376,7 +379,7 @@ func (l *Locer) Fix(node *ast.File) {
 }
 
 func (l *Locer) Create(args []string, lang language.Tag) {
-	err := filepath.Walk(path.Join(translationDir, l.DefaultLang.String()),
+	err := filepath.Walk(path.Join(translationDir, l.DefaultLang),
 		func(fpath string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
@@ -402,7 +405,7 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 				xmlData.Rows[i].Value = ""
 			}
 
-			filename := strings.Replace(fpath, sep(l.DefaultLang.String()), sep(lang.String()), 1)
+			filename := strings.Replace(fpath, sep(l.DefaultLang), sep(lang.String()), 1)
 
 			if err := os.MkdirAll(path.Dir(filename), 0755); err != nil {
 				return err
@@ -428,37 +431,186 @@ func (l *Locer) Create(args []string, lang language.Tag) {
 }
 
 func (l *Locer) CheckAll() error {
-	LoadAll(l.DefaultLang.String())
-	fmt.Println(len(data))
-	fmt.Println(len(data[l.DefaultLang.String()]))
+	LoadAll(l.DefaultLang)
 
-	for k := range data {
-		lang := language.Make(k)
-		if err := l.check(lang); err != nil {
+	v := getHTMLValidator()
+	for lang := range data {
+		if err := l.check(v, lang); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (l *Locer) Check(lang language.Tag) error {
-	LoadLangAll(l.DefaultLang.String())
-	LoadLangAll(lang.String())
-	fmt.Println(len(data))
-	fmt.Println(len(data[l.DefaultLang.String()]))
+func (l *Locer) Check(lang string) error {
+	LoadLangAll(l.DefaultLang)
+	LoadLangAll(lang)
 
-	return l.check(lang)
+	err := l.check(getHTMLValidator(), lang)
+	if err != nil {
+		return fmt.Errorf("error found for %s: %w", lang, err)
+	}
+	return nil
 }
 
-func (l *Locer) check(lang language.Tag) error {
-	if lang == l.DefaultLang { // don't check english
+func getHTMLValidator() htmlcheck.Validator {
+	v := htmlcheck.Validator{}
+	v.AddValidTags([]*htmlcheck.ValidTag{
+		{Name: "b"}, {Name: "strong"},
+		{Name: "i"}, {Name: "em"},
+		{Name: "u"}, {Name: "ins"},
+		{Name: "s"}, {Name: "strike"}, {Name: "del"},
+		{
+			Name:  "a",
+			Attrs: []string{"href"},
+		},
+		{
+			Name:  "code",
+			Attrs: []string{"class"},
+		},
+		{Name: "pre"},
+	})
+	return v
+}
+
+func (l *Locer) check(v htmlcheck.Validator, lang string) error {
+	if lang == l.DefaultLang { // don't check default
 		return nil
 	}
-	// TODO: check all inputs contain correct {} tags
-	// TODO: check all inputs have the html tags escaped right; & < > ' "
-	// TODO: check all inputs have valid newlines
-	// TODO: check all inputs have start/end whitespace
+
+	for s, d := range data[lang] {
+		if s != d.Name {
+			Logger.Errorf("%s: '%s'\tfatally incorrect", lang, s)
+			continue
+		}
+		defLangVal := data[l.DefaultLang][s]
+
+		if defLangVal.Id != d.Id {
+			Logger.Errorf("%s: '%s'\thas different ids from default language %s", lang, s, l.DefaultLang)
+			continue
+		}
+
+		if defLangVal.Value == d.Value {
+			// Same; skip.
+			continue
+		}
+
+		if err := checkCurlies(defLangVal.Value, d.Value); err != nil {
+			Logger.Errorf("%s: '%s'\tcurlies mismatch: %s", lang, s, err.Error())
+
+		}
+		if err := checkValidHTML(v, defLangVal.Value, d.Value); err != nil {
+			Logger.Errorf("%s: '%s'\tHTML error: %s", lang, s, err.Error())
+		}
+		//if err := checkWS(defLangVal.Value, d.Value); err != nil {
+		//	Logger.Errorf("%s: '%s'\twhitespace error: %s", lang, s, err.Error())
+		//}
+		if err := checkForSymbols(defLangVal.Value, d.Value); err != nil {
+			Logger.Errorf("%s: '%s'\tsymbols error: %s", lang, s, err.Error())
+		}
+	}
 	// TODO: investigate changing decoder
+	return nil
+}
+
+func checkValidHTML(v htmlcheck.Validator, def string, custom string) error {
+	errs := v.ValidateHtmlString(custom)
+	if len(errs) == 0 {
+		return nil
+	}
+
+	sourceHasInvalidTags := false
+	invTags := 0
+
+	defErrs := v.ValidateHtmlString(def)
+	if len(defErrs) != 0 {
+		for _, e := range defErrs {
+			if e.Reason == htmlcheck.InvTag {
+				sourceHasInvalidTags = true
+				invTags++
+			}
+		}
+		for _, e := range errs {
+			if e.Reason == htmlcheck.InvTag {
+				invTags--
+			}
+		}
+	}
+
+	if len(errs) == 1 {
+		if sourceHasInvalidTags && invTags == 0 {
+			// ignore
+			return nil
+		}
+
+		return fmt.Errorf("html error in custom string: %w", errs[0])
+	}
+
+	return fmt.Errorf("%d html errors in custom string", len(errs))
+}
+
+var wsStartRex = regexp.MustCompile(`(?m)^\s*`)
+var wsEndRex = regexp.MustCompile(`(?m)\s*$`)
+
+func checkWS(def string, custom string) error {
+	pref := wsStartRex.FindString(def)
+	if !strings.HasPrefix(custom, pref) {
+		return fmt.Errorf("mismatched whitespace prefix")
+	}
+
+	suff := wsEndRex.FindString(def)
+	if !strings.HasSuffix(custom, suff) {
+		return fmt.Errorf("mismatched whitespace suffix")
+	}
+
+	return nil
+}
+
+func checkForSymbols(def string, custom string) error {
+	if strings.Count(def, "@") != strings.Count(custom, "@") {
+		return errors.New("unexpected number of @'s")
+	}
+
+	return nil
+}
+
+var curliesRex = regexp.MustCompile(`\{\d+?\}`)
+
+// Basic regex check to see if expected matches. Should be good enough for now.
+func checkCurlies(def string, custom string) error {
+	defMatches := curliesRex.FindAllStringSubmatch(def, -1)
+	customMatches := curliesRex.FindAllStringSubmatch(custom, -1)
+
+	if len(defMatches) != len(customMatches) {
+		return fmt.Errorf("different number of format tags (should be %d, got %d)", len(defMatches), len(customMatches))
+	}
+
+	matches := map[string]int{}
+	for _, d := range defMatches {
+		matches[d[0]]++
+	}
+
+	for _, d := range customMatches {
+		m := d[0]
+		if _, ok := matches[m]; !ok {
+			return fmt.Errorf("unknown curly %s in custom string", m)
+		}
+		matches[m]--
+	}
+
+	for s, c := range matches {
+		if c == 0 {
+			continue
+		}
+
+		if c > 0 {
+			return fmt.Errorf("not enough uses of %s", s)
+		}
+		if c < 0 {
+			return fmt.Errorf("too many uses of %s", s)
+		}
+
+	}
 	return nil
 }
 
